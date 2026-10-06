@@ -1,0 +1,341 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Student or general user profile in Kalam Library",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "userId": { "type": "string", "maxLength": 30 },
+        "name": { "type": "string", "maxLength": 100 },
+        "profileImageUrl": { "type": "string" },
+        "phone": { "type": "string", "maxLength": 20 },
+        "email": { "type": "string", "maxLength": 100 },
+        "dateOfBirth": { "type": "string" },
+        "gender": { "type": "string", "enum": ["Male", "Female", "Other"] },
+        "address": { "type": "string", "maxLength": 300 },
+        "fatherName": { "type": "string", "maxLength": 100 },
+        "motherName": { "type": "string", "maxLength": 100 },
+        "guardianName": { "type": "string", "maxLength": 100 },
+        "guardianPhone": { "type": "string", "maxLength": 20 },
+        "aadhaarMasked": { "type": "string", "maxLength": 20 },
+        "className": { "type": "string", "maxLength": 50 },
+        "batchId": { "type": "string", "maxLength": 50 },
+        "membershipStatus": { "type": "string", "enum": ["ACTIVE", "EXPIRING_SOON", "EXPIRED", "INACTIVE"] },
+        "membershipType": { "type": "string", "maxLength": 50 },
+        "membershipStartDate": { "type": "string" },
+        "membershipEndDate": { "type": "string" },
+        "assignedSeatId": { "type": "string" },
+        "assignedSeatNumber": { "type": "string", "maxLength": 20 },
+        "active": { "type": "boolean" },
+        "role": { "type": "string", "enum": ["STUDENT", "ADMIN", "SUPER_ADMIN", "LIBRARIAN", "TEACHER", "ACCOUNTANT", "STAFF"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "userId", "name"]
+    },
+    "UserIdentifier": {
+      "title": "UserIdentifier",
+      "description": "Index for unique user ID uniqueness checks",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "userId"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Administrator account and role record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["SUPER_ADMIN", "ADMIN", "LIBRARIAN", "TEACHER", "ACCOUNTANT", "STAFF"] },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE", "SUSPENDED"] },
+        "createdAt": { "type": "string" },
+        "lastLogin": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "JoinRequest": {
+      "title": "JoinRequest",
+      "description": "Student admission / library join request",
+      "type": "object",
+      "properties": {
+        "requestId": { "type": "string" },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 20 },
+        "email": { "type": "string", "maxLength": 100 },
+        "interest": { "type": "string", "maxLength": 100 },
+        "message": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["NEW", "CONTACTED", "INTERESTED", "APPROVED", "REJECTED", "COMPLETED"] },
+        "assignedTo": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["requestId", "fullName", "phone", "status"]
+    },
+    "LibraryMembership": {
+      "title": "LibraryMembership",
+      "description": "Student library membership record",
+      "type": "object",
+      "properties": {
+        "membershipId": { "type": "string" },
+        "uid": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "membershipType": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "EXPIRING_SOON", "EXPIRED", "INACTIVE"] },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "assignedSeatId": { "type": "string" },
+        "assignedSeatNumber": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["membershipId", "uid", "status"]
+    },
+    "LibrarySeat": {
+      "title": "LibrarySeat",
+      "description": "Visual seat in the library study hall",
+      "type": "object",
+      "properties": {
+        "seatId": { "type": "string" },
+        "seatNumber": { "type": "string", "maxLength": 20 },
+        "floor": { "type": "string", "maxLength": 20 },
+        "section": { "type": "string", "maxLength": 30 },
+        "status": { "type": "string", "enum": ["AVAILABLE", "OCCUPIED", "RESERVED", "MAINTENANCE"] },
+        "assignedUid": { "type": "string" },
+        "assignedStudentName": { "type": "string" },
+        "assignedStudentUserId": { "type": "string" },
+        "notes": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["seatId", "seatNumber", "status"]
+    },
+    "LibraryBook": {
+      "title": "LibraryBook",
+      "description": "Book item in the library catalog",
+      "type": "object",
+      "properties": {
+        "bookId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 200 },
+        "author": { "type": "string", "maxLength": 100 },
+        "isbn": { "type": "string", "maxLength": 30 },
+        "category": { "type": "string", "maxLength": 50 },
+        "coverImageUrl": { "type": "string" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "totalCopies": { "type": "integer" },
+        "availableCopies": { "type": "integer" },
+        "isAvailable": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["bookId", "title", "totalCopies", "availableCopies"]
+    },
+    "LibraryIssue": {
+      "title": "LibraryIssue",
+      "description": "Record of a book issued or returned",
+      "type": "object",
+      "properties": {
+        "issueId": { "type": "string" },
+        "uid": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "bookId": { "type": "string" },
+        "bookTitle": { "type": "string" },
+        "issuedAt": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "returnedAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["ISSUED", "RETURNED", "OVERDUE", "RESERVED"] },
+        "renewalCount": { "type": "integer" },
+        "issuedBy": { "type": "string" },
+        "returnedBy": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["issueId", "uid", "bookId", "status"]
+    },
+    "LibraryAttendance": {
+      "title": "LibraryAttendance",
+      "description": "Daily student attendance log for library hall",
+      "type": "object",
+      "properties": {
+        "attendanceId": { "type": "string" },
+        "uid": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["PRESENT", "ABSENT"] },
+        "checkIn": { "type": "string" },
+        "checkOut": { "type": "string" },
+        "shift": { "type": "string" },
+        "markedBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["attendanceId", "uid", "date", "status"]
+    },
+    "GatePass": {
+      "title": "GatePass",
+      "description": "Digital gate pass verification record",
+      "type": "object",
+      "properties": {
+        "passId": { "type": "string" },
+        "uid": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "membershipId": { "type": "string" },
+        "validFrom": { "type": "string" },
+        "validUntil": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "EXPIRED", "REVOKED", "INACTIVE"] },
+        "secureToken": { "type": "string" },
+        "seatNumber": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["passId", "uid", "status"]
+    },
+    "Fee": {
+      "title": "Fee",
+      "description": "Student tuition, library, or exam fee record",
+      "type": "object",
+      "properties": {
+        "feeId": { "type": "string" },
+        "uid": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["PAID", "PENDING", "OVERDUE", "CANCELLED"] },
+        "dueDate": { "type": "string" },
+        "paidDate": { "type": "string" },
+        "receiptNumber": { "type": "string" },
+        "invoiceUrl": { "type": "string" },
+        "paymentMode": { "type": "string" },
+        "recordedBy": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["feeId", "uid", "amount", "status"]
+    },
+    "Notice": {
+      "title": "Notice",
+      "description": "Institutional notice or announcement",
+      "type": "object",
+      "properties": {
+        "noticeId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 200 },
+        "body": { "type": "string", "maxLength": 2000 },
+        "category": { "type": "string", "enum": ["GENERAL", "IMPORTANT", "LIBRARY", "MEMBERSHIP", "ATTENDANCE", "FEE", "HOLIDAY", "EVENT", "SYSTEM"] },
+        "imageUrl": { "type": "string" },
+        "attachmentUrl": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["ALL", "ACTIVE_MEMBERS", "LIBRARY_MEMBERS", "SPECIFIC_USER", "CLASS_BATCH"] },
+        "targetId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["noticeId", "title", "body", "category"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Broadcast or targeted FCM push notification dispatch",
+      "type": "object",
+      "properties": {
+        "notificationId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "message": { "type": "string", "maxLength": 500 },
+        "imageUrl": { "type": "string" },
+        "category": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["ALL", "SPECIFIC_USER", "ACTIVE_MEMBERS", "LIBRARY_MEMBERS", "CLASS_BATCH"] },
+        "targetId": { "type": "string" },
+        "targetScreen": { "type": "string" },
+        "status": { "type": "string", "enum": ["SENT", "SCHEDULED", "FAILED"] },
+        "recipientCount": { "type": "integer" },
+        "createdAt": { "type": "string" },
+        "sentBy": { "type": "string" }
+      },
+      "required": ["notificationId", "title", "message", "status"]
+    },
+    "AdminActivityLog": {
+      "title": "AdminActivityLog",
+      "description": "Audit trail log of all administrative actions",
+      "type": "object",
+      "properties": {
+        "logId": { "type": "string" },
+        "adminUid": { "type": "string" },
+        "adminName": { "type": "string" },
+        "adminRole": { "type": "string" },
+        "action": { "type": "string" },
+        "targetType": { "type": "string" },
+        "targetId": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["logId", "adminUid", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User and student profiles"
+    },
+    "/userIdentifiers/{userId}": {
+      "schema": "UserIdentifier",
+      "description": "Unique mapping of human-readable user ID to UID"
+    },
+    "/admins/{uid}": {
+      "schema": "Admin",
+      "description": "Staff and admin role registry"
+    },
+    "/joinRequests/{requestId}": {
+      "schema": "JoinRequest",
+      "description": "Admission / library membership join requests"
+    },
+    "/libraryMemberships/{membershipId}": {
+      "schema": "LibraryMembership",
+      "description": "Library passes and subscription periods"
+    },
+    "/librarySeats/{seatId}": {
+      "schema": "LibrarySeat",
+      "description": "Study hall seat map and allocations"
+    },
+    "/libraryBooks/{bookId}": {
+      "schema": "LibraryBook",
+      "description": "Book inventory"
+    },
+    "/libraryIssues/{issueId}": {
+      "schema": "LibraryIssue",
+      "description": "Issued books and return records"
+    },
+    "/libraryAttendance/{attendanceId}": {
+      "schema": "LibraryAttendance",
+      "description": "Daily attendance logs"
+    },
+    "/gatePasses/{passId}": {
+      "schema": "GatePass",
+      "description": "Access gate passes"
+    },
+    "/fees/{feeId}": {
+      "schema": "Fee",
+      "description": "Fees and billing records"
+    },
+    "/notices/{noticeId}": {
+      "schema": "Notice",
+      "description": "Bulletins and notices"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Push notification dispatches"
+    },
+    "/adminActivityLogs/{logId}": {
+      "schema": "AdminActivityLog",
+      "description": "Administrative audit logs"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Kalam Library — Admin Web Panel",
+  "description": "Comprehensive administrative web panel for Kalam Library Gursarai managing students, library memberships, seats, books, attendance, coaching, fees, notices, gate passes, and push notifications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

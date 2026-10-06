@@ -1,0 +1,28 @@
+[
+  {
+    "noticeId": "notc_1791280033654",
+    "title": "Kalam Library Grand Opening & Timing Update",
+    "body": "Library Study Hall is open from 6:00 AM to 11:00 PM daily. High speed Wi-Fi and air conditioning available on Ground Floor and First Floor.",
+    "category": "IMPORTANT",
+    "targetType": "ALL",
+    "targetId": "",
+    "imageUrl": "",
+    "expiresAt": "",
+    "createdAt": "2026-10-06T09:47:13.654Z",
+    "isActive": true,
+    "createdBy": "SUPER ADMIN"
+  },
+  {
+    "noticeId": "notc_1791279316915",
+    "title": "Library Operating Schedule & Quiet Study Hours",
+    "body": "Ground Floor & First Floor study hall halls are open daily from 6:00 AM to 11:00 PM. Please maintain silence in Section A and present your QR gate pass upon entrance.",
+    "category": "IMPORTANT",
+    "targetType": "ALL",
+    "targetId": "",
+    "imageUrl": "",
+    "expiresAt": "",
+    "createdAt": "2026-10-06T09:35:16.915Z",
+    "isActive": true,
+    "createdBy": "SUPER ADMIN"
+  }
+]

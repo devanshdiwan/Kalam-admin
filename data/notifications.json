@@ -1,0 +1,44 @@
+[
+  {
+    "notificationId": "notif_1791280049866",
+    "title": "Welcome to Kalam Library App",
+    "message": "Push notifications are now connected and fully working on your Android device.",
+    "targetType": "ALL",
+    "targetId": "",
+    "targetScreen": "Home",
+    "category": "IMPORTANT",
+    "imageUrl": "",
+    "status": "SENT",
+    "recipientCount": 1,
+    "createdAt": "2026-10-06T09:47:31.393Z",
+    "sentBy": "SUPER ADMIN"
+  },
+  {
+    "notificationId": "notif_1791280036200",
+    "title": "[Notice] Kalam Library Grand Opening & Timing Update",
+    "message": "Library Study Hall is open from 6:00 AM to 11:00 PM daily. High speed Wi-Fi and air conditioning available on Ground Floor and First Floor.",
+    "targetType": "ALL",
+    "targetId": "notc_1791280033654",
+    "targetScreen": "Notices",
+    "category": "IMPORTANT",
+    "imageUrl": "",
+    "status": "SENT",
+    "recipientCount": 1,
+    "createdAt": "2026-10-06T09:47:13.654Z",
+    "sentBy": "SUPER ADMIN"
+  },
+  {
+    "notificationId": "notif_1791279316920",
+    "title": "Library Operating Schedule & Quiet Study Hours",
+    "message": "Ground Floor & First Floor study hall halls are open daily from 6:00 AM to 11:00 PM.",
+    "targetType": "ALL",
+    "targetId": "",
+    "targetScreen": "Notices",
+    "category": "IMPORTANT",
+    "imageUrl": "",
+    "status": "SENT",
+    "recipientCount": 1,
+    "createdAt": "2026-10-06T09:35:16.920Z",
+    "sentBy": "SUPER ADMIN"
+  }
+]

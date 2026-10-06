@@ -1,0 +1,180 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isCurrentUser(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (request.auth.token.email != null && request.auth.token.email == "devanshdiwan97@gmail.com")
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.:]+$');
+    }
+
+    // Admins registry
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Users (Students / Accounts) - Allow read so student user app can login and verify profile
+    match /users/{uid} {
+      allow read: if true;
+      allow write: if isAdmin();
+
+      // FCM device token registration
+      match /devices/{deviceId} {
+        allow read: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
+        allow write: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
+      }
+
+      // Student notification inbox
+      match /notifications/{notificationId} {
+        allow read: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
+        allow write: if isAdmin();
+      }
+    }
+
+    // User identifier mappings for uniqueness and lookup
+    match /userIdentifiers/{identifierId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Join Requests
+    match /joinRequests/{requestId} {
+      allow read: if isAdmin();
+      allow create: if true; // Public submission from student app or portal
+      allow update, delete: if isAdmin();
+    }
+
+    // Library Memberships
+    match /libraryMemberships/{membershipId} {
+      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Library Seats
+    match /librarySeats/{seatId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Library Books
+    match /libraryBooks/{bookId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Library Issues & Returns
+    match /libraryIssues/{issueId} {
+      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Library Attendance
+    match /libraryAttendance/{attendanceId} {
+      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Gate Passes
+    match /gatePasses/{passId} {
+      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Fees & Billing
+    match /fees/{feeId} {
+      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Notices
+    match /notices/{noticeId} {
+      allow read, write: if true;
+    }
+
+    // Push Notifications
+    match /notifications/{notificationId} {
+      allow read, write: if true;
+    }
+
+    // Coaching collections
+    match /coachingClasses/{classId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /coachingBatches/{batchId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /coachingSubjects/{subjectId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /coachingAttendance/{id} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+    match /homework/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /assignments/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /studyMaterials/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /tests/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /results/{id} {
+      allow get: if isSignedIn() && (resource.data.studentId == request.auth.uid || isAdmin());
+      allow list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Admin Activity Logs
+    match /adminActivityLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false; // Immutable audit log
+    }
+
+    // User Devices for FCM
+    match /users/{uid}/devices/{deviceId} {
+      allow read, write: if true;
+    }
+
+    // User Notifications
+    match /users/{uid}/notifications/{notificationId} {
+      allow read, write: if true;
+    }
+  }
+}
