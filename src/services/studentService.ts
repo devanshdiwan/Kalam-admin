@@ -45,27 +45,37 @@ export interface CreateStudentPayload {
 }
 
 export async function isUserIdUnique(userId: string, excludeUid?: string): Promise<boolean> {
+  if (!userId || typeof userId !== 'string' || !userId.trim()) return false;
   const norm = userId.trim().toUpperCase();
-  const existing = repoStudents.getAll().some(s => 
-    s.userId.trim().toUpperCase() === norm && (!excludeUid || s.uid !== excludeUid)
-  );
+  const existing = repoStudents.getAll().some(s => {
+    if (!s || !s.userId) return false;
+    const sNorm = String(s.userId).trim().toUpperCase();
+    return sNorm === norm && (!excludeUid || s.uid !== excludeUid);
+  });
   return !existing;
 }
 
 export async function generateNextUserId(): Promise<string> {
   const all = repoStudents.getAll();
-  if (all.length === 0) return 'KL-1001';
-
   let maxNum = 1000;
   all.forEach(s => {
-    const match = s.userId.match(/KL-(\d+)/i);
+    if (!s || !s.userId) return;
+    const match = String(s.userId).match(/KL-(\d+)/i);
     if (match && match[1]) {
       const n = parseInt(match[1], 10);
-      if (n > maxNum) maxNum = n;
+      if (!isNaN(n) && n > maxNum && n < 90000) maxNum = n;
     }
   });
 
-  return `KL-${maxNum + 1}`;
+  let nextId = `KL-${maxNum + 1}`;
+  let attempt = 1;
+  while (!(await isUserIdUnique(nextId)) && attempt < 100) {
+    maxNum += 1;
+    nextId = `KL-${maxNum + 1}`;
+    attempt++;
+  }
+
+  return nextId;
 }
 
 export async function syncAllStudentsToServer(students: UserProfile[]): Promise<void> {
@@ -83,9 +93,14 @@ export async function createStudentAccount(
   payload: CreateStudentPayload, 
   currentAdmin: { uid: string; name: string; role: string }
 ): Promise<UserProfile> {
-  const unique = await isUserIdUnique(payload.userId);
+  const normUserId = (payload.userId || '').trim().toUpperCase();
+  if (!normUserId) {
+    throw new Error('User ID is required.');
+  }
+
+  const unique = await isUserIdUnique(normUserId);
   if (!unique) {
-    throw new Error(`User ID "${payload.userId}" is already registered. Please choose or generate another ID.`);
+    throw new Error(`User ID "${normUserId}" is already registered. Please choose or generate another ID.`);
   }
 
   let uid = `std_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -98,7 +113,10 @@ export async function createStudentAccount(
     const response = await fetch('/api/admin/create-student', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        ...payload,
+        userId: normUserId
+      }),
       signal: controller.signal
     });
     clearTimeout(timeoutId);
@@ -117,21 +135,21 @@ export async function createStudentAccount(
 
   const newStudent: UserProfile = {
     uid,
-    userId: payload.userId.trim().toUpperCase(),
-    password: payload.password?.trim() || '123456',
-    name: payload.name.trim(),
-    email: payload.email.trim().toLowerCase(),
-    phone: payload.phone.trim(),
+    userId: normUserId,
+    password: (payload.password || '123456').trim(),
+    name: (payload.name || '').trim(),
+    email: (payload.email || '').trim().toLowerCase(),
+    phone: (payload.phone || '').trim(),
     dateOfBirth: payload.dateOfBirth || '',
     gender: payload.gender || 'Male',
-    address: payload.address || '',
-    fatherName: payload.fatherName || '',
-    motherName: payload.motherName || '',
-    guardianName: payload.guardianName || '',
-    guardianPhone: payload.guardianPhone || '',
-    aadhaarMasked: payload.aadhaarMasked ? (payload.aadhaarMasked.startsWith('XXXX') ? payload.aadhaarMasked : `XXXX XXXX ${payload.aadhaarMasked.slice(-4)}`) : '',
-    className: payload.className || '',
-    batchId: payload.batchId || '',
+    address: (payload.address || '').trim(),
+    fatherName: (payload.fatherName || '').trim(),
+    motherName: (payload.motherName || '').trim(),
+    guardianName: (payload.guardianName || '').trim(),
+    guardianPhone: (payload.guardianPhone || '').trim(),
+    aadhaarMasked: payload.aadhaarMasked ? (payload.aadhaarMasked.startsWith('XXXX') ? payload.aadhaarMasked : `XXXX XXXX ${(payload.aadhaarMasked || '').slice(-4)}`) : '',
+    className: (payload.className || '').trim(),
+    batchId: (payload.batchId || '').trim(),
     membershipType: payload.membershipType || 'Full-Day (12 Hours)',
     membershipStatus: payload.membershipStatus || 'ACTIVE',
     membershipStartDate: payload.membershipStartDate || nowIso.split('T')[0],

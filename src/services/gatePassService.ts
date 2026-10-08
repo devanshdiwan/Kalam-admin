@@ -91,7 +91,9 @@ export async function verifyGatePassTokenOrId(identifier: string): Promise<GateP
     };
   }
 
-  const student = repoStudents.getById(pass.uid) || repoStudents.getAll().find(s => s.userId.toUpperCase() === pass.studentId.toUpperCase());
+  const student = repoStudents.getById(pass.uid) || repoStudents.getAll().find(s => 
+    s && s.userId && (s.userId || '').toString().toUpperCase() === (pass.studentId || '').toString().toUpperCase()
+  );
   if (!student) {
     return {
       valid: false,

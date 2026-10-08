@@ -112,7 +112,10 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setIdSuccess(true);
       setIdError('');
     } catch {
-      setUserId('KL-1024');
+      const fallbackId = `KL-${Math.floor(10050 + Math.random() * 500)}`;
+      setUserId(fallbackId);
+      setIdSuccess(true);
+      setIdError('');
     } finally {
       setIsCheckingId(false);
     }
@@ -184,33 +187,33 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       }
 
       const selectedSeat = availableSeats.find(s => s.seatId === assignedSeatId);
-      const cleanEmail = email.trim().toLowerCase().includes('@') 
-        ? email.trim().toLowerCase() 
-        : `${userId.trim().toLowerCase()}@kalamlibrary.internal`;
+      const cleanEmail = (email || '').trim().toLowerCase().includes('@') 
+        ? (email || '').trim().toLowerCase() 
+        : `${(userId || '').trim().toLowerCase()}@kalamlibrary.internal`;
 
       const student = await createStudentAccount({
-        userId: userId.trim().toUpperCase(),
-        password,
-        name: name.trim(),
+        userId: (userId || '').trim().toUpperCase(),
+        password: (password || '123456').trim(),
+        name: (name || '').trim(),
         email: cleanEmail,
-        phone: phone.trim(),
-        dateOfBirth,
-        gender,
-        address: address.trim(),
-        fatherName: fatherName.trim(),
-        motherName: motherName.trim(),
-        guardianName: guardianName.trim(),
-        guardianPhone: guardianPhone.trim(),
-        aadhaarMasked: aadhaarRaw.trim(),
-        className: className.trim(),
-        batchId: batchId.trim(),
-        membershipType,
+        phone: (phone || '').trim(),
+        dateOfBirth: dateOfBirth || '',
+        gender: gender || 'Male',
+        address: (address || '').trim(),
+        fatherName: (fatherName || '').trim(),
+        motherName: (motherName || '').trim(),
+        guardianName: (guardianName || '').trim(),
+        guardianPhone: (guardianPhone || '').trim(),
+        aadhaarMasked: (aadhaarRaw || '').trim(),
+        className: (className || '').trim(),
+        batchId: (batchId || '').trim(),
+        membershipType: membershipType || 'Full-Day (12 Hours)',
         membershipStatus: 'ACTIVE',
-        membershipStartDate,
-        membershipEndDate,
+        membershipStartDate: membershipStartDate || new Date().toISOString().split('T')[0],
+        membershipEndDate: membershipEndDate || '',
         assignedSeatId: assignedSeatId || '',
         assignedSeatNumber: selectedSeat ? selectedSeat.seatNumber : '',
-        profileImageUrl: finalProfileUrl
+        profileImageUrl: finalProfileUrl || ''
       }, {
         uid: adminProfile?.uid || 'admin_sys',
         name: adminProfile?.name || 'Administrator',

@@ -491,6 +491,19 @@ app.post('/api/student/update-password', (req: Request, res: Response) => {
   }
 });
 
+// Check if User ID is already taken
+app.get('/api/admin/check-user-id', (req: Request, res: Response) => {
+  const queryId = ((req.query.userId as string) || '').trim().toUpperCase();
+  const excludeUid = ((req.query.excludeUid as string) || '').trim();
+  if (!queryId) return res.json({ exists: false });
+
+  serverStudents = loadStudentsFromFile();
+  const exists = serverStudents.some(s => 
+    (s.userId || '').toString().trim().toUpperCase() === queryId && (!excludeUid || s.uid !== excludeUid)
+  );
+  return res.json({ exists, userId: queryId });
+});
+
 // Privileged API: Create Student
 app.post('/api/admin/create-student', async (req: Request, res: Response) => {
   try {
