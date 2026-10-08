@@ -20,15 +20,16 @@ export const NoticesPage: React.FC<NoticesPageProps> = ({
   const { adminProfile, role } = useAuth();
   const [search, setSearch] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const handleDelete = async (noticeId: string) => {
-    if (!window.confirm('Are you sure you want to delete this notice?')) return;
     try {
       await deleteNotice(noticeId, {
         uid: adminProfile?.uid || 'adm',
         name: adminProfile?.name || 'Administrator',
         role: role || 'ADMIN'
       });
+      setConfirmDeleteId(null);
       onRefresh();
     } catch (e) {
       console.error(e);
@@ -138,13 +139,31 @@ export const NoticesPage: React.FC<NoticesPageProps> = ({
                   {new Date(notice.createdAt).toLocaleDateString()}
                 </span>
 
-                <button
-                  onClick={() => handleDelete(notice.noticeId)}
-                  className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-md transition-colors cursor-pointer"
-                  title="Delete Notice"
-                >
-                  <Trash2 size={14} />
-                </button>
+                {confirmDeleteId === notice.noticeId ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-rose-400 font-semibold">Delete?</span>
+                    <button
+                      onClick={() => handleDelete(notice.noticeId)}
+                      className="px-2 py-0.5 bg-rose-500 hover:bg-rose-600 text-white text-[10px] font-bold rounded cursor-pointer"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded cursor-pointer"
+                    >
+                      No
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDeleteId(notice.noticeId)}
+                    className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-md transition-colors cursor-pointer"
+                    title="Delete Notice"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             </div>
           ))}

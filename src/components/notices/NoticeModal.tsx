@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { FileText, AlertCircle, Bell } from 'lucide-react';
 import { Modal } from '../common/Modal';
-import { NoticeCategory, NoticeTarget } from '../../types/models';
+import { NoticeCategory, NoticeTarget, NoticeItem } from '../../types/models';
 import { createNotice } from '../../services/noticeService';
 import { useAuth } from '../../context/AuthContext';
 
 interface NoticeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (notice?: NoticeItem) => void;
 }
 
 export const NoticeModal: React.FC<NoticeModalProps> = ({
@@ -50,7 +50,7 @@ export const NoticeModal: React.FC<NoticeModalProps> = ({
     setError('');
 
     try {
-      await createNotice({
+      const created = await createNotice({
         title: title.trim(),
         body: body.trim(),
         category,
@@ -70,7 +70,7 @@ export const NoticeModal: React.FC<NoticeModalProps> = ({
       setImageUrl('');
       setExpiresAt('');
 
-      onSuccess();
+      onSuccess(created);
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to publish notice.');

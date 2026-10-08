@@ -9,50 +9,92 @@ import {
   orderBy, 
   onSnapshot 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, isQuotaExceeded, handleQuotaExceeded } from './firebase';
 import { AdminUser, AdminRole } from '../types/models';
 import { logAdminActivity } from './auditService';
+import { getAdminAccounts, saveAdminAccounts, StoredAdminAccount } from './adminStore';
 
 const COLLECTION_NAME = 'admins';
 
 export function subscribeToAdminUsers(callback: (admins: AdminUser[]) => void, onError?: (err: any) => void) {
-  const q = query(collection(db, COLLECTION_NAME), orderBy('createdAt', 'desc'));
-  return onSnapshot(q, (snapshot) => {
-    const list = snapshot.docs.map(d => d.data() as AdminUser);
-    callback(list);
-  }, (err) => {
-    if (onError) onError(err);
-    handleFirestoreError(err, OperationType.LIST, COLLECTION_NAME);
-  });
+  // 1. Immediately emit locally available accounts so the table is never blank
+  const localAccounts = getAdminAccounts();
+  callback(localAccounts);
+
+  if (isQuotaExceeded()) {
+    return () => {};
+  }
+
+  let unsub: (() => void) | undefined;
+  try {
+    const q = query(collection(db, COLLECTION_NAME), orderBy('createdAt', 'desc'));
+    unsub = onSnapshot(q, (snapshot) => {
+      if (!snapshot.empty) {
+        const list = snapshot.docs.map(d => d.data() as AdminUser);
+        // Merge with local accounts
+        const map = new Map<string, AdminUser>();
+        localAccounts.forEach(a => map.set(a.uid || a.email, a));
+        list.forEach(a => map.set(a.uid || a.email, a));
+        callback(Array.from(map.values()));
+      }
+    }, (err) => {
+      const isQuota = (err as any)?.code === 'resource-exhausted' ||
+        String(err?.message || '').toLowerCase().includes('quota') ||
+        String(err?.message || '').toLowerCase().includes('resource-exhausted');
+      
+      if (unsub) {
+        try { unsub(); } catch {}
+        unsub = undefined;
+      }
+
+      if (isQuota) {
+        handleQuotaExceeded(err?.message).catch(() => {});
+      } else {
+        if (onError) onError(err);
+        handleFirestoreError(err, OperationType.LIST, COLLECTION_NAME);
+      }
+    });
+  } catch {
+    // Graceful fallback
+  }
+
+  return () => {
+    if (unsub) {
+      try { unsub(); } catch {}
+    }
+  };
 }
 
 export async function bootstrapInitialAdmin(user: { uid: string; email: string; displayName?: string | null }): Promise<AdminUser> {
-  const docRef = doc(db, COLLECTION_NAME, user.uid);
-  const snap = await getDoc(docRef);
+  const localAccounts = getAdminAccounts();
+  const existingLocal = localAccounts.find(a => a.email.toLowerCase() === user.email.toLowerCase());
+  if (existingLocal) return existingLocal;
 
-  if (snap.exists()) {
-    const existing = snap.data() as AdminUser;
-    // update lastLogin
-    await updateDoc(docRef, { lastLogin: new Date().toISOString() }).catch(() => {});
-    return existing;
-  }
-
-  // Check if any admin exists in collection
-  const allAdmins = await getDocs(collection(db, COLLECTION_NAME));
-  const isFirst = allAdmins.empty;
   const isOwner = user.email.toLowerCase() === 'devanshdiwan97@gmail.com';
-
-  const newAdmin: AdminUser = {
+  const newAdmin: StoredAdminAccount = {
     uid: user.uid,
     name: user.displayName || user.email.split('@')[0] || 'Administrator',
     email: user.email,
-    role: (isFirst || isOwner) ? 'SUPER_ADMIN' : 'STAFF',
+    role: (localAccounts.length === 0 || isOwner) ? 'SUPER_ADMIN' : 'STAFF',
     status: 'ACTIVE',
     createdAt: new Date().toISOString(),
     lastLogin: new Date().toISOString()
   };
 
-  await setDoc(docRef, newAdmin);
+  localAccounts.push(newAdmin);
+  saveAdminAccounts(localAccounts);
+
+  if (!isQuotaExceeded()) {
+    try {
+      const docRef = doc(db, COLLECTION_NAME, user.uid);
+      await setDoc(docRef, newAdmin).catch((err: any) => {
+        if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+          handleQuotaExceeded(err?.message).catch(() => {});
+        }
+      });
+    } catch {}
+  }
+
   return newAdmin;
 }
 
@@ -60,35 +102,46 @@ export async function createAdminUser(
   data: { uid?: string; name: string; email: string; role: AdminRole },
   currentAdmin: { uid: string; name: string; role: string }
 ): Promise<AdminUser> {
-  try {
-    const targetUid = data.uid || `adm_${Date.now()}`;
-    const newAdmin: AdminUser = {
-      uid: targetUid,
-      name: data.name,
-      email: data.email.toLowerCase(),
-      role: data.role,
-      status: 'ACTIVE',
-      createdAt: new Date().toISOString(),
-      lastLogin: ''
-    };
+  const targetUid = data.uid || `adm_${Date.now()}`;
+  const newAdmin: StoredAdminAccount = {
+    uid: targetUid,
+    name: data.name,
+    email: data.email.toLowerCase(),
+    role: data.role,
+    status: 'ACTIVE',
+    createdAt: new Date().toISOString(),
+    lastLogin: ''
+  };
 
-    await setDoc(doc(db, COLLECTION_NAME, targetUid), newAdmin);
-
-    await logAdminActivity({
-      adminUid: currentAdmin.uid,
-      adminName: currentAdmin.name,
-      adminRole: currentAdmin.role,
-      action: 'Admin User Created',
-      targetType: 'ADMIN_USER',
-      targetId: targetUid,
-      details: `Created admin user ${data.name} with role ${data.role}`
-    });
-
-    return newAdmin;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, COLLECTION_NAME);
-    throw err;
+  // Always persist locally
+  const accounts = getAdminAccounts();
+  if (accounts.some(a => a.email.toLowerCase() === newAdmin.email.toLowerCase())) {
+    throw new Error(`An administrator with email "${data.email}" already exists.`);
   }
+  accounts.push(newAdmin);
+  saveAdminAccounts(accounts);
+
+  if (!isQuotaExceeded()) {
+    try {
+      await setDoc(doc(db, COLLECTION_NAME, targetUid), newAdmin).catch((err: any) => {
+        if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+          handleQuotaExceeded(err?.message).catch(() => {});
+        }
+      });
+    } catch {}
+  }
+
+  await logAdminActivity({
+    adminUid: currentAdmin.uid,
+    adminName: currentAdmin.name,
+    adminRole: currentAdmin.role,
+    action: 'Admin User Created',
+    targetType: 'ADMIN_USER',
+    targetId: targetUid,
+    details: `Created admin user ${data.name} with role ${data.role}`
+  }).catch(() => {});
+
+  return newAdmin;
 }
 
 export async function updateAdminRole(
@@ -96,22 +149,33 @@ export async function updateAdminRole(
   newRole: AdminRole,
   currentAdmin: { uid: string; name: string; role: string }
 ): Promise<void> {
-  try {
-    const docRef = doc(db, COLLECTION_NAME, adminUid);
-    await updateDoc(docRef, { role: newRole });
-
-    await logAdminActivity({
-      adminUid: currentAdmin.uid,
-      adminName: currentAdmin.name,
-      adminRole: currentAdmin.role,
-      action: 'Admin Role Updated',
-      targetType: 'ADMIN_USER',
-      targetId: adminUid,
-      details: `Changed role to ${newRole}`
-    });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `${COLLECTION_NAME}/${adminUid}`);
+  const accounts = getAdminAccounts();
+  const index = accounts.findIndex(a => a.uid === adminUid);
+  if (index >= 0) {
+    accounts[index].role = newRole;
+    saveAdminAccounts(accounts);
   }
+
+  if (!isQuotaExceeded()) {
+    try {
+      const docRef = doc(db, COLLECTION_NAME, adminUid);
+      await updateDoc(docRef, { role: newRole }).catch((err: any) => {
+        if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+          handleQuotaExceeded(err?.message).catch(() => {});
+        }
+      });
+    } catch {}
+  }
+
+  await logAdminActivity({
+    adminUid: currentAdmin.uid,
+    adminName: currentAdmin.name,
+    adminRole: currentAdmin.role,
+    action: 'Admin Role Updated',
+    targetType: 'ADMIN_USER',
+    targetId: adminUid,
+    details: `Changed role to ${newRole}`
+  }).catch(() => {});
 }
 
 export async function toggleAdminStatus(
@@ -119,20 +183,31 @@ export async function toggleAdminStatus(
   newStatus: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED',
   currentAdmin: { uid: string; name: string; role: string }
 ): Promise<void> {
-  try {
-    const docRef = doc(db, COLLECTION_NAME, adminUid);
-    await updateDoc(docRef, { status: newStatus });
-
-    await logAdminActivity({
-      adminUid: currentAdmin.uid,
-      adminName: currentAdmin.name,
-      adminRole: currentAdmin.role,
-      action: 'Admin Status Changed',
-      targetType: 'ADMIN_USER',
-      targetId: adminUid,
-      details: `Changed status to ${newStatus}`
-    });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `${COLLECTION_NAME}/${adminUid}`);
+  const accounts = getAdminAccounts();
+  const index = accounts.findIndex(a => a.uid === adminUid);
+  if (index >= 0) {
+    accounts[index].status = newStatus;
+    saveAdminAccounts(accounts);
   }
+
+  if (!isQuotaExceeded()) {
+    try {
+      const docRef = doc(db, COLLECTION_NAME, adminUid);
+      await updateDoc(docRef, { status: newStatus }).catch((err: any) => {
+        if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+          handleQuotaExceeded(err?.message).catch(() => {});
+        }
+      });
+    } catch {}
+  }
+
+  await logAdminActivity({
+    adminUid: currentAdmin.uid,
+    adminName: currentAdmin.name,
+    adminRole: currentAdmin.role,
+    action: 'Admin Status Changed',
+    targetType: 'ADMIN_USER',
+    targetId: adminUid,
+    details: `Changed status to ${newStatus}`
+  }).catch(() => {});
 }

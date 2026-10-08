@@ -146,9 +146,6 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
   };
 
   const handleDelete = (admin: StoredAdminAccount) => {
-    if (!window.confirm(`Are you sure you want to remove administrator "${admin.name}" (${admin.email})?`)) {
-      return;
-    }
     try {
       deleteAdminAccount(admin.uid, {
         uid: adminProfile?.uid || 'adm_root',
@@ -160,7 +157,8 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
       setSuccessToast(`Admin "${admin.name}" removed.`);
       setTimeout(() => setSuccessToast(''), 4000);
     } catch (err: any) {
-      alert(err.message || 'Cannot delete admin.');
+      setSuccessToast(`Cannot delete admin: ${err.message}`);
+      setTimeout(() => setSuccessToast(''), 4000);
     }
   };
 

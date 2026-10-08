@@ -1,8 +1,23 @@
 import { UserProfile } from '../types/models';
 import { logAdminActivity } from './auditService';
 import { repoStudents, repoSeats } from './dataRepository';
-import { db } from './firebase';
+import { db, storage, isQuotaExceeded, handleQuotaExceeded } from './firebase';
 import { doc, setDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+
+export async function uploadProfilePhoto(userId: string, file: File): Promise<string> {
+  try {
+    const fileExt = file.name.split('.').pop() || 'jpg';
+    const cleanId = (userId || 'student').trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+    const storageRef = ref(storage, `profile_photos/${cleanId}_${Date.now()}.${fileExt}`);
+    const snapshot = await uploadBytes(storageRef, file);
+    const downloadUrl = await getDownloadURL(snapshot.ref);
+    return downloadUrl;
+  } catch (err: any) {
+    console.error('Storage upload error:', err);
+    throw new Error(`Profile image upload failed: ${err.message || 'Storage write failed'}`);
+  }
+}
 
 export interface CreateStudentPayload {
   userId: string;
@@ -76,18 +91,29 @@ export async function createStudentAccount(
   let uid = `std_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const nowIso = new Date().toISOString();
 
-  // Try server route to sync file storage
+  // Call server route to create Firebase Auth account and persist
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
   try {
     const response = await fetch('/api/admin/create-student', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
-    if (response.ok) {
-      const data = await response.json();
-      if (data.uid) uid = data.uid;
+    clearTimeout(timeoutId);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to create student account on backend.');
     }
-  } catch {}
+    if (data.uid) uid = data.uid;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('Student account creation request timed out. Please try again.');
+    }
+    throw err;
+  }
 
   const newStudent: UserProfile = {
     uid,
@@ -121,11 +147,19 @@ export async function createStudentAccount(
 
   await repoStudents.set(newStudent);
 
-  // Sync to Firestore under both UID and UserID so student app lookups find it instantly
-  try {
-    await setDoc(doc(db, 'users', newStudent.uid), newStudent, { merge: true }).catch(() => {});
-    await setDoc(doc(db, 'users', newStudent.userId), newStudent, { merge: true }).catch(() => {});
-    await setDoc(doc(db, 'userIdentifiers', newStudent.userId), {
+  // Sync to Firestore under both UID and UserID in background (non-blocking, only when quota allows)
+  if (!isQuotaExceeded()) {
+    setDoc(doc(db, 'users', newStudent.uid), newStudent, { merge: true }).catch((err: any) => {
+      if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+        handleQuotaExceeded(err?.message).catch(() => {});
+      }
+    });
+    setDoc(doc(db, 'users', newStudent.userId), newStudent, { merge: true }).catch((err: any) => {
+      if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+        handleQuotaExceeded(err?.message).catch(() => {});
+      }
+    });
+    setDoc(doc(db, 'userIdentifiers', newStudent.userId), {
       userId: newStudent.userId,
       uid: newStudent.uid,
       name: newStudent.name,
@@ -134,7 +168,7 @@ export async function createStudentAccount(
       active: true,
       updatedAt: nowIso
     }, { merge: true }).catch(() => {});
-  } catch {}
+  }
 
   // If a seat was assigned, update seat allocation
   if (payload.assignedSeatId) {
@@ -177,23 +211,21 @@ export async function updateStudentProfile(
     });
   } catch {}
 
-  // Sync to Firestore
+  // Sync to Firestore in background without blocking
   if (updated) {
-    try {
-      await setDoc(doc(db, 'users', uid), updated, { merge: true }).catch(() => {});
-      if (updated.userId) {
-        await setDoc(doc(db, 'users', updated.userId.toUpperCase()), updated, { merge: true }).catch(() => {});
-        await setDoc(doc(db, 'userIdentifiers', updated.userId.toUpperCase()), {
-          userId: updated.userId.toUpperCase(),
-          uid: updated.uid,
-          name: updated.name,
-          email: updated.email,
-          phone: updated.phone,
-          active: updated.active !== false,
-          updatedAt: new Date().toISOString()
-        }, { merge: true }).catch(() => {});
-      }
-    } catch {}
+    setDoc(doc(db, 'users', uid), updated, { merge: true }).catch(() => {});
+    if (updated.userId) {
+      setDoc(doc(db, 'users', updated.userId.toUpperCase()), updated, { merge: true }).catch(() => {});
+      setDoc(doc(db, 'userIdentifiers', updated.userId.toUpperCase()), {
+        userId: updated.userId.toUpperCase(),
+        uid: updated.uid,
+        name: updated.name,
+        email: updated.email,
+        phone: updated.phone,
+        active: updated.active !== false,
+        updatedAt: new Date().toISOString()
+      }, { merge: true }).catch(() => {});
+    }
   }
 
   await logAdminActivity({

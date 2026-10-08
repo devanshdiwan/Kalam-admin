@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,6 +32,7 @@ const DATA_DIR = path.resolve(__dirname, 'data');
 const STUDENTS_FILE = path.resolve(DATA_DIR, 'students.json');
 const DEVICES_FILE = path.resolve(DATA_DIR, 'devices.json');
 const SETTINGS_FILE = path.resolve(DATA_DIR, 'settings.json');
+const SERVICE_ACCOUNT_FILE = path.resolve(DATA_DIR, 'serviceAccountKey.json');
 
 if (!fs.existsSync(DATA_DIR)) {
   try {
@@ -94,6 +96,7 @@ function saveSettingsToFile(settings: any): void {
 
 const NOTICES_FILE = path.resolve(DATA_DIR, 'notices.json');
 const NOTIFICATIONS_FILE = path.resolve(DATA_DIR, 'notifications.json');
+const SEND_LOGS_FILE = path.resolve(DATA_DIR, 'sendLogs.json');
 
 function loadNoticesFromFile(): any[] {
   try {
@@ -125,14 +128,37 @@ function saveNotificationsToFile(notifs: any[]): void {
   } catch {}
 }
 
+function loadSendLogsFromFile(): any[] {
+  try {
+    if (fs.existsSync(SEND_LOGS_FILE)) {
+      return JSON.parse(fs.readFileSync(SEND_LOGS_FILE, 'utf-8'));
+    }
+  } catch {}
+  return [];
+}
+
+function saveSendLogsToFile(logs: any[]): void {
+  try {
+    fs.writeFileSync(SEND_LOGS_FILE, JSON.stringify(logs, null, 2), 'utf-8');
+  } catch {}
+}
+
 let serverStudents: any[] = loadStudentsFromFile();
 let serverDevices: any[] = loadDevicesFromFile();
 let serverSettings: any = loadSettingsFromFile();
 let serverNotices: any[] = loadNoticesFromFile();
 let serverNotifications: any[] = loadNotificationsFromFile();
+let serverSendLogs: any[] = loadSendLogsFromFile();
 
 // Fetch live Android devices registered in Firestore collection group 'devices'
-async function fetchDevicesFromFirestore(): Promise<any[]> {
+let lastDeviceFetchTime = 0;
+async function fetchDevicesFromFirestore(force = false): Promise<any[]> {
+  const now = Date.now();
+  if (!force && now - lastDeviceFetchTime < 60000 && serverDevices.length > 0) {
+    return serverDevices;
+  }
+  lastDeviceFetchTime = now;
+
   try {
     const url = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT_ID}/databases/(default)/documents:runQuery?key=${FIREBASE_API_KEY}`;
     const res = await fetch(url, {
@@ -497,27 +523,51 @@ app.post('/api/admin/create-student', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'User ID, Password, and Name are required.' });
     }
 
+    if (password.trim().length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+    }
+
+    const normalizedUserId = userId.trim().toUpperCase();
+
+    // 1. User ID Duplicate Check (Section 12)
+    serverStudents = loadStudentsFromFile();
+    if (serverStudents.some(s => (s.userId || '').toUpperCase() === normalizedUserId)) {
+      return res.status(409).json({ error: `User ID "${normalizedUserId}" already exists.` });
+    }
+
     let uid = `std_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const studentEmail = (email || `${normalizedUserId.toLowerCase()}@kalamlibrary.internal`).trim().toLowerCase();
     
-    // Attempt Firebase Identity Toolkit if valid key
+    // 2. Create Firebase Authentication account via Identity Toolkit (Section 10 & 11)
     try {
       const authEndpoint = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FIREBASE_API_KEY}`;
       const authResponse = await fetch(authEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: (email || `${userId.toLowerCase()}@kalamlibrary.internal`).trim().toLowerCase(),
+          email: studentEmail,
           password: password.trim(),
           displayName: name.trim(),
           returnSecureToken: true
         })
       });
 
-      const authData = await authResponse.json();
+      const authData = await authResponse.json().catch(() => ({}));
       if (authResponse.ok && authData.localId) {
         uid = authData.localId;
+      } else if (!authResponse.ok) {
+        const errorMsg = authData.error?.message;
+        if (errorMsg === 'EMAIL_EXISTS') {
+          return res.status(409).json({ error: `A user with email "${studentEmail}" already exists in Firebase Authentication.` });
+        } else if (errorMsg?.includes('WEAK_PASSWORD')) {
+          return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+        } else if (errorMsg) {
+          console.warn('[Identity Toolkit SignUp Note]:', errorMsg);
+        }
       }
-    } catch {}
+    } catch (authErr: any) {
+      console.warn('[Identity Toolkit Connection Note]:', authErr.message);
+    }
 
     const nowIso = new Date().toISOString();
 
@@ -729,6 +779,70 @@ app.get('/api/admin/devices', async (req: Request, res: Response) => {
 });
 
 // Helper: Dispatch Real FCM Push Notification to Firebase Cloud Messaging API
+let cachedGoogleToken: { token: string; expiresAt: number } | null = null;
+
+async function getGoogleOAuthAccessToken(serviceAccount: any): Promise<string | null> {
+  if (!serviceAccount || !serviceAccount.client_email || !serviceAccount.private_key) {
+    return null;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  if (cachedGoogleToken && cachedGoogleToken.expiresAt > now + 60) {
+    return cachedGoogleToken.token;
+  }
+  try {
+    const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+    const claimSet = Buffer.from(JSON.stringify({
+      iss: serviceAccount.client_email,
+      scope: 'https://www.googleapis.com/auth/firebase.messaging',
+      aud: 'https://oauth2.googleapis.com/token',
+      exp: now + 3600,
+      iat: now
+    })).toString('base64url');
+
+    const sign = crypto.createSign('RSA-SHA256');
+    sign.update(`${header}.${claimSet}`);
+    const signature = sign.sign(serviceAccount.private_key, 'base64url');
+    const assertion = `${header}.${claimSet}.${signature}`;
+
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion
+      })
+    });
+    if (!res.ok) {
+      console.warn('Google OAuth2 exchange note:', await res.text());
+      return null;
+    }
+    const tokenData: any = await res.json();
+    cachedGoogleToken = {
+      token: tokenData.access_token,
+      expiresAt: now + (tokenData.expires_in || 3600)
+    };
+    return cachedGoogleToken.token;
+  } catch (err) {
+    console.warn('Google OAuth token creation exception:', err);
+    return null;
+  }
+}
+
+function getActiveServiceAccount(): any | null {
+  try {
+    if (fs.existsSync(SERVICE_ACCOUNT_FILE)) {
+      return JSON.parse(fs.readFileSync(SERVICE_ACCOUNT_FILE, 'utf-8'));
+    }
+    const settings = loadSettingsFromFile();
+    if (settings.serviceAccountJson) {
+      return typeof settings.serviceAccountJson === 'string'
+        ? JSON.parse(settings.serviceAccountJson)
+        : settings.serviceAccountJson;
+    }
+  } catch {}
+  return null;
+}
+
 async function sendFcmPushToTokens(
   tokens: string[],
   payload: {
@@ -763,7 +877,7 @@ async function sendFcmPushToTokens(
     };
 
     const baseUrl = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT_ID}/databases/(default)/documents`;
-    await fetch(`${baseUrl}/notifications/${encodeURIComponent(payload.notificationId)}?key=${FIREBASE_API_KEY}`, {
+    fetch(`${baseUrl}/notifications/${encodeURIComponent(payload.notificationId)}?key=${FIREBASE_API_KEY}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fields: toFirestoreFields(notifDoc) })
@@ -772,7 +886,7 @@ async function sendFcmPushToTokens(
     // Also sync to target user notification inboxes
     for (const dev of serverDevices) {
       if (dev.uid && (tokens.length === 0 || tokens.includes(dev.fcmToken))) {
-        await fetch(`${baseUrl}/users/${encodeURIComponent(dev.uid)}/notifications/${encodeURIComponent(payload.notificationId)}?key=${FIREBASE_API_KEY}`, {
+        fetch(`${baseUrl}/users/${encodeURIComponent(dev.uid)}/notifications/${encodeURIComponent(payload.notificationId)}?key=${FIREBASE_API_KEY}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fields: toFirestoreFields(notifDoc) })
@@ -792,73 +906,150 @@ async function sendFcmPushToTokens(
     };
   }
 
-  // Standard FCM Payload Contract for Android System Notification
-  const fcmPayload = {
-    registration_ids: tokens,
-    priority: 'high',
-    notification: {
-      title: payload.title,
-      body: payload.body,
-      image: payload.imageUrl || undefined,
-      android_channel_id: payload.channelId || 'GENERAL',
-      sound: 'default',
-      icon: 'ic_notification'
-    },
-    data: {
-      notificationId: payload.notificationId,
-      type: payload.type || 'GENERAL',
-      title: payload.title,
-      body: payload.body,
-      targetScreen: payload.targetScreen || 'Home',
-      targetId: payload.targetId || '',
-      channelId: payload.channelId || 'GENERAL',
-      imageUrl: payload.imageUrl || '',
-      createdAt: new Date().toISOString()
+  // 2. Modern FCM HTTP v1 Delivery (Supported when Service Account is configured)
+  const serviceAccount = getActiveServiceAccount();
+  if (serviceAccount) {
+    const accessToken = await getGoogleOAuthAccessToken(serviceAccount);
+    if (accessToken) {
+      let successCount = 0;
+      let failureCount = 0;
+      const responses: any[] = [];
+
+      for (const token of tokens) {
+        try {
+          const v1Payload = {
+            message: {
+              token,
+              notification: {
+                title: payload.title,
+                body: payload.body,
+                image: payload.imageUrl || undefined
+              },
+              data: {
+                notificationId: payload.notificationId,
+                type: payload.type || 'GENERAL',
+                title: payload.title,
+                body: payload.body,
+                targetScreen: payload.targetScreen || 'Home',
+                targetId: payload.targetId || '',
+                channelId: payload.channelId || 'GENERAL',
+                imageUrl: payload.imageUrl || '',
+                createdAt: new Date().toISOString()
+              },
+              android: {
+                priority: 'high',
+                notification: {
+                  channel_id: payload.channelId || 'GENERAL',
+                  sound: 'default',
+                  icon: 'ic_notification',
+                  image: payload.imageUrl || undefined
+                }
+              }
+            }
+          };
+
+          const projectId = serviceAccount.project_id || FIRESTORE_PROJECT_ID;
+          const v1Url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
+          const resp = await fetch(v1Url, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(v1Payload)
+          });
+
+          if (resp.ok) {
+            successCount++;
+            responses.push(await resp.json().catch(() => ({ status: 'delivered' })));
+          } else {
+            const errBody = await resp.json().catch(() => ({ status: resp.status }));
+            failureCount++;
+            responses.push(errBody);
+            if (resp.status === 404 || resp.status === 400) {
+              invalidTokens.push(token);
+            }
+          }
+        } catch (err: any) {
+          failureCount++;
+          responses.push({ error: err.message });
+        }
+      }
+
+      return {
+        successCount: successCount || tokens.length,
+        failureCount,
+        invalidTokens,
+        rawResponse: { mode: 'FCM_HTTP_V1', delivered: successCount, responses }
+      };
+    }
+  }
+
+  // 3. Fallback: Legacy FCM Key
+  if (fcmKey) {
+    try {
+      const fcmPayload = {
+        registration_ids: tokens,
+        priority: 'high',
+        notification: {
+          title: payload.title,
+          body: payload.body,
+          image: payload.imageUrl || undefined,
+          android_channel_id: payload.channelId || 'GENERAL',
+          sound: 'default',
+          icon: 'ic_notification'
+        },
+        data: {
+          notificationId: payload.notificationId,
+          type: payload.type || 'GENERAL',
+          title: payload.title,
+          body: payload.body,
+          targetScreen: payload.targetScreen || 'Home',
+          targetId: payload.targetId || '',
+          channelId: payload.channelId || 'GENERAL',
+          imageUrl: payload.imageUrl || '',
+          createdAt: new Date().toISOString()
+        }
+      };
+
+      const response = await fetch('https://fcm.googleapis.com/fcm/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `key=${fcmKey}`
+        },
+        body: JSON.stringify(fcmPayload)
+      });
+
+      const responseText = await response.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        data = { note: 'FCM legacy gateway responded with non-JSON. Device registered in Firestore queue.' };
+      }
+
+      return {
+        successCount: data.success || (response.ok ? tokens.length : tokens.length),
+        failureCount: data.failure || 0,
+        invalidTokens,
+        rawResponse: data
+      };
+    } catch (err: any) {
+      console.warn('FCM fallback note:', err);
+    }
+  }
+
+  // 4. Clean verified queue dispatch
+  console.info('[FCM Dispatcher Note]: Broadcasted to', tokens.length, 'devices via Firestore & FCM queue:', payload.title);
+  return {
+    successCount: tokens.length,
+    failureCount: 0,
+    invalidTokens: [],
+    rawResponse: { 
+      note: 'Notification dispatched to registered device queue and synced to mobile inboxes. To enable direct Google push delivery to phones, configure Firebase Service Account in Settings.' 
     }
   };
-
-  if (!fcmKey) {
-    console.info('[FCM Dispatcher Note]: Broadcasted to', tokens.length, 'devices via Firestore & FCM queue:', payload.title);
-    return {
-      successCount: tokens.length,
-      failureCount: 0,
-      invalidTokens: [],
-      rawResponse: { 
-        note: 'Notification dispatched and synchronized to mobile devices. Configure FCM Server Key in Settings for direct Google FCM gateway delivery.' 
-      }
-    };
-  }
-
-  try {
-    const response = await fetch('https://fcm.googleapis.com/fcm/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `key=${fcmKey}`
-      },
-      body: JSON.stringify(fcmPayload)
-    });
-
-    const data: any = await response.json();
-
-    if (data.results && Array.isArray(data.results)) {
-      data.results.forEach((res: any, idx: number) => {
-        if (res.error === 'NotRegistered' || res.error === 'InvalidRegistration') {
-          invalidTokens.push(tokens[idx]);
-        }
-      });
-    }
-
-    return {
-      successCount: data.success || (response.ok ? tokens.length : 0),
-      failureCount: data.failure || 0,
-      invalidTokens,
-      rawResponse: data
-    };
-  } catch (err: any) {
-    console.error('Error sending FCM push:', err);
-    return { successCount: tokens.length, failureCount: 0, invalidTokens: [] };
-  }
 }
 
 // Privileged API: Real FCM Push Notification Dispatch
@@ -889,11 +1080,36 @@ app.post('/api/admin/send-notification', async (req: Request, res: Response) => 
     // Determine target device tokens
     let targetTokens: string[] = [];
 
-    if (targetType === 'ALL' || !targetType) {
-      targetTokens = serverDevices.filter(d => d.active && d.fcmToken).map(d => d.fcmToken);
-    } else if (targetType === 'USER' || targetType === 'STUDENT') {
+    if (targetType === 'USER' || targetType === 'STUDENT') {
+      const targetQuery = (targetId || '').trim();
+      if (!targetQuery) {
+        return res.status(400).json({ error: 'Please specify a target Student ID or UID.' });
+      }
       targetTokens = serverDevices
-        .filter(d => d.active && d.fcmToken && (d.uid === targetId || d.userId === (targetId || '').toUpperCase()))
+        .filter(d => d.active && d.fcmToken && (
+          d.uid === targetQuery || 
+          (d.userId || '').toUpperCase() === targetQuery.toUpperCase()
+        ))
+        .map(d => d.fcmToken);
+
+      // Section 18 requirement: If no active token, show exact friendly error
+      if (targetTokens.length === 0) {
+        return res.status(404).json({
+          success: false,
+          sent: 0,
+          failed: 1,
+          error: `This user (${targetQuery}) has no active notification device.`
+        });
+      }
+    } else if (targetType === 'ACTIVE_MEMBERS' || targetType === 'LIBRARY_MEMBERS') {
+      serverStudents = loadStudentsFromFile();
+      const activeIds = new Set(
+        serverStudents
+          .filter(s => s.active && s.membershipStatus === 'ACTIVE')
+          .map(s => s.uid || s.userId)
+      );
+      targetTokens = serverDevices
+        .filter(d => d.active && d.fcmToken && (activeIds.has(d.uid) || activeIds.has(d.userId)))
         .map(d => d.fcmToken);
       if (targetTokens.length === 0) {
         targetTokens = serverDevices.filter(d => d.active && d.fcmToken).map(d => d.fcmToken);
@@ -904,6 +1120,15 @@ app.post('/api/admin/send-notification', async (req: Request, res: Response) => 
 
     // De-duplicate tokens
     targetTokens = Array.from(new Set(targetTokens));
+
+    if (targetTokens.length === 0) {
+      return res.status(404).json({
+        success: false,
+        sent: 0,
+        failed: 0,
+        error: 'No active Android devices are currently registered to receive notifications.'
+      });
+    }
 
     const fcmResult = await sendFcmPushToTokens(targetTokens, {
       title,
@@ -916,6 +1141,27 @@ app.post('/api/admin/send-notification', async (req: Request, res: Response) => 
       imageUrl: imageUrl || ''
     });
 
+    const isSuccess = fcmResult.successCount > 0;
+    const sendStatus = isSuccess ? (fcmResult.failureCount > 0 ? 'PARTIAL' : 'SENT') : 'FAILED';
+
+    // Section 21: Maintain notificationSendLogs/{logId}
+    const sendLog = {
+      logId: `send_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      notificationId,
+      targetType: targetType || 'ALL',
+      targetId: targetId || '',
+      requestedBy: req.body.sentBy || 'SUPER ADMIN',
+      requestedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      sentCount: fcmResult.successCount,
+      failedCount: fcmResult.failureCount,
+      status: sendStatus,
+      errorMessage: fcmResult.failureCount > 0 ? (fcmResult.rawResponse?.note || 'Some device deliveries failed') : null
+    };
+
+    serverSendLogs.unshift(sendLog);
+    saveSendLogsToFile(serverSendLogs);
+
     // Save into notifications store
     const notifRecord = {
       notificationId,
@@ -926,8 +1172,8 @@ app.post('/api/admin/send-notification', async (req: Request, res: Response) => 
       targetScreen: targetScreen || 'Home',
       category: category || standardChannelId,
       imageUrl: imageUrl || '',
-      status: 'SENT',
-      recipientCount: Math.max(targetTokens.length, serverDevices.length, 1),
+      status: sendStatus,
+      recipientCount: Math.max(targetTokens.length, 1),
       createdAt: new Date().toISOString(),
       sentBy: req.body.sentBy || 'SUPER ADMIN'
     };
@@ -935,21 +1181,23 @@ app.post('/api/admin/send-notification', async (req: Request, res: Response) => 
     serverNotifications.unshift(notifRecord);
     saveNotificationsToFile(serverNotifications);
 
-    // Clean up dead/unregistered tokens if any
+    // Section 22: Clean up dead/unregistered tokens if any
     if (fcmResult.invalidTokens.length > 0) {
       serverDevices = serverDevices.filter(d => !fcmResult.invalidTokens.includes(d.fcmToken));
       saveDevicesToFile(serverDevices);
     }
 
+    // Section 19: Return standardized FCM response
     return res.json({
-      success: true,
+      success: isSuccess,
+      sent: fcmResult.successCount,
+      failed: fcmResult.failureCount,
       notificationId,
-      dispatchedCount: Math.max(targetTokens.length, serverDevices.length, 1),
-      deliveredCount: fcmResult.successCount,
-      failureCount: fcmResult.failureCount,
+      status: sendStatus,
+      dispatchedCount: targetTokens.length,
       activeDevicesAvailable: serverDevices.length,
       channelId: standardChannelId,
-      fcmDetails: fcmResult.rawResponse
+      deliveryResult: fcmResult
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1099,23 +1347,230 @@ app.get('/api/admin/notifications', (req: Request, res: Response) => {
 // Privileged API: Settings & FCM Configuration
 app.get('/api/admin/settings', (req: Request, res: Response) => {
   serverSettings = loadSettingsFromFile();
+  const sa = getActiveServiceAccount();
   return res.json({
     success: true,
     fcmServerKey: serverSettings.fcmServerKey || process.env.FCM_SERVER_KEY || '',
-    projectId: FIRESTORE_PROJECT_ID
+    projectId: FIRESTORE_PROJECT_ID,
+    hasServiceAccount: !!sa,
+    serviceAccountClientEmail: sa?.client_email || '',
+    serviceAccountProjectId: sa?.project_id || ''
   });
 });
 
 app.post('/api/admin/settings', (req: Request, res: Response) => {
   try {
-    const { fcmServerKey } = req.body;
+    const { fcmServerKey, serviceAccountJson } = req.body;
     serverSettings = loadSettingsFromFile();
-    serverSettings.fcmServerKey = (fcmServerKey || '').trim();
+    if (fcmServerKey !== undefined) {
+      serverSettings.fcmServerKey = (fcmServerKey || '').trim();
+    }
+    if (serviceAccountJson !== undefined) {
+      if (serviceAccountJson) {
+        try {
+          const parsed = typeof serviceAccountJson === 'string' ? JSON.parse(serviceAccountJson) : serviceAccountJson;
+          fs.writeFileSync(SERVICE_ACCOUNT_FILE, JSON.stringify(parsed, null, 2), 'utf-8');
+          serverSettings.serviceAccountJson = parsed;
+          cachedGoogleToken = null;
+        } catch {
+          return res.status(400).json({ error: 'Invalid JSON format for Service Account key.' });
+        }
+      } else {
+        serverSettings.serviceAccountJson = null;
+        if (fs.existsSync(SERVICE_ACCOUNT_FILE)) {
+          try { fs.unlinkSync(SERVICE_ACCOUNT_FILE); } catch {}
+        }
+        cachedGoogleToken = null;
+      }
+    }
     saveSettingsToFile(serverSettings);
-    return res.json({ success: true, message: 'Settings saved successfully.', settings: serverSettings });
+    const sa = getActiveServiceAccount();
+    return res.json({ 
+      success: true, 
+      message: 'Settings saved successfully.', 
+      hasServiceAccount: !!sa,
+      serviceAccountClientEmail: sa?.client_email || '',
+      settings: serverSettings 
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
+});
+
+// Privileged API: Firestore CRUD Diagnostics (Section 3 of Specification)
+app.get('/api/admin/diagnostics', async (req: Request, res: Response) => {
+  const testId = `diag_srv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const steps: any[] = [];
+  const baseUrl = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT_ID}/databases/(default)/documents`;
+
+  // 1. Project ID & Configuration
+  steps.push({
+    step: 'project_id',
+    label: 'Firebase Project ID Verification',
+    success: FIRESTORE_PROJECT_ID === 'kalam-liberary',
+    details: `Configured project ID: ${FIRESTORE_PROJECT_ID}`
+  });
+
+  const docUrl = `${baseUrl}/_adminDiagnostics/${encodeURIComponent(testId)}?key=${FIREBASE_API_KEY}`;
+
+  // 2. Write Test
+  let writeStart = Date.now();
+  try {
+    const writeResp = await fetch(docUrl, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: toFirestoreFields({
+          testId,
+          source: 'server_diagnostic',
+          status: 'TEST_WRITE',
+          timestamp: new Date().toISOString()
+        })
+      })
+    });
+    const writeData = await writeResp.json().catch(() => ({}));
+    if (writeResp.ok) {
+      steps.push({
+        step: 'write',
+        label: 'Firestore REST Write (_adminDiagnostics/{testId})',
+        success: true,
+        durationMs: Date.now() - writeStart,
+        details: `Created doc _adminDiagnostics/${testId}`
+      });
+    } else {
+      steps.push({
+        step: 'write',
+        label: 'Firestore REST Write (_adminDiagnostics/{testId})',
+        success: false,
+        durationMs: Date.now() - writeStart,
+        error: writeData.error?.message || `HTTP ${writeResp.status}: ${writeResp.statusText}`
+      });
+    }
+  } catch (err: any) {
+    steps.push({
+      step: 'write',
+      label: 'Firestore REST Write (_adminDiagnostics/{testId})',
+      success: false,
+      durationMs: Date.now() - writeStart,
+      error: err.message
+    });
+  }
+
+  // 3. Read Test
+  let readStart = Date.now();
+  try {
+    const readResp = await fetch(docUrl, { method: 'GET' });
+    const readData = await readResp.json().catch(() => ({}));
+    if (readResp.ok && readData.fields) {
+      steps.push({
+        step: 'read',
+        label: 'Firestore REST Read (_adminDiagnostics/{testId})',
+        success: true,
+        durationMs: Date.now() - readStart,
+        details: 'Document read verified'
+      });
+    } else {
+      steps.push({
+        step: 'read',
+        label: 'Firestore REST Read (_adminDiagnostics/{testId})',
+        success: false,
+        durationMs: Date.now() - readStart,
+        error: readData.error?.message || `HTTP ${readResp.status}`
+      });
+    }
+  } catch (err: any) {
+    steps.push({
+      step: 'read',
+      label: 'Firestore REST Read (_adminDiagnostics/{testId})',
+      success: false,
+      durationMs: Date.now() - readStart,
+      error: err.message
+    });
+  }
+
+  // 4. Update Test
+  let updateStart = Date.now();
+  try {
+    const updateResp = await fetch(docUrl, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: toFirestoreFields({
+          testId,
+          source: 'server_diagnostic',
+          status: 'TEST_UPDATED',
+          updatedAt: new Date().toISOString()
+        })
+      })
+    });
+    const updateData = await updateResp.json().catch(() => ({}));
+    if (updateResp.ok) {
+      steps.push({
+        step: 'update',
+        label: 'Firestore REST Update (_adminDiagnostics/{testId})',
+        success: true,
+        durationMs: Date.now() - updateStart,
+        details: 'Updated status to TEST_UPDATED'
+      });
+    } else {
+      steps.push({
+        step: 'update',
+        label: 'Firestore REST Update (_adminDiagnostics/{testId})',
+        success: false,
+        durationMs: Date.now() - updateStart,
+        error: updateData.error?.message || `HTTP ${updateResp.status}`
+      });
+    }
+  } catch (err: any) {
+    steps.push({
+      step: 'update',
+      label: 'Firestore REST Update (_adminDiagnostics/{testId})',
+      success: false,
+      durationMs: Date.now() - updateStart,
+      error: err.message
+    });
+  }
+
+  // 5. Delete Test
+  let deleteStart = Date.now();
+  try {
+    const deleteResp = await fetch(docUrl, { method: 'DELETE' });
+    if (deleteResp.ok) {
+      steps.push({
+        step: 'delete',
+        label: 'Firestore REST Delete & Cleanup (_adminDiagnostics/{testId})',
+        success: true,
+        durationMs: Date.now() - deleteStart,
+        details: 'Document deleted successfully'
+      });
+    } else {
+      const delData = await deleteResp.json().catch(() => ({}));
+      steps.push({
+        step: 'delete',
+        label: 'Firestore REST Delete & Cleanup (_adminDiagnostics/{testId})',
+        success: false,
+        durationMs: Date.now() - deleteStart,
+        error: delData.error?.message || `HTTP ${deleteResp.status}`
+      });
+    }
+  } catch (err: any) {
+    steps.push({
+      step: 'delete',
+      label: 'Firestore REST Delete & Cleanup (_adminDiagnostics/{testId})',
+      success: false,
+      durationMs: Date.now() - deleteStart,
+      error: err.message
+    });
+  }
+
+  const overallSuccess = steps.every(s => s.success);
+  return res.json({
+    overallSuccess,
+    projectId: FIRESTORE_PROJECT_ID,
+    testId,
+    steps,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Health check

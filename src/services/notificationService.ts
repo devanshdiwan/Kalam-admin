@@ -34,24 +34,39 @@ export async function sendPushNotification(
   const notificationId = `notif_${Date.now()}`;
   const nowIso = new Date().toISOString();
 
-  // Call secure server-side FCM dispatcher
+  // Call secure server-side FCM dispatcher with timeout to prevent stuck transmitting UI
   let dispatchedCount = 1;
-  const resp = await fetch('/api/admin/send-notification', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      ...payload,
-      sentBy: currentAdmin.name
-    })
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-  if (!resp.ok) {
-    const errData = await resp.json().catch(() => ({}));
-    throw new Error(errData.error || 'Failed to dispatch push notification.');
+  let resp: Response;
+  try {
+    resp = await fetch('/api/admin/send-notification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...payload,
+        sentBy: currentAdmin.name
+      }),
+      signal: controller.signal
+    });
+  } catch (netErr: any) {
+    clearTimeout(timeoutId);
+    if (netErr.name === 'AbortError') {
+      throw new Error('FCM push transmission timed out after 15 seconds. Please check device connectivity.');
+    }
+    throw new Error(`Push notification network error: ${netErr.message || 'Server unreachable'}`);
   }
+  clearTimeout(timeoutId);
 
-  const data = await resp.json();
-  if (data.dispatchedCount) dispatchedCount = data.dispatchedCount;
+  let data: any = {};
+  if (resp.ok) {
+    data = await resp.json().catch(() => ({}));
+    if (data.dispatchedCount) dispatchedCount = data.dispatchedCount;
+  } else {
+    const errData = await resp.json().catch(() => ({}));
+    throw new Error(errData.error || `Push transmission failed (HTTP ${resp.status}).`);
+  }
 
   const item: NotificationItem = {
     notificationId,
@@ -92,10 +107,27 @@ export async function testPushSingleDevice(
     targetScreen?: string;
   }
 ): Promise<any> {
-  const resp = await fetch('/api/admin/test-push', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  return await resp.json();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const resp = await fetch('/api/admin/test-push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok && !data.error) {
+      data.error = `HTTP ${resp.status}: Could not dispatch test push`;
+    }
+    return data;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      return { success: false, error: 'Test push request timed out after 12 seconds.' };
+    }
+    return { success: false, error: err.message || 'Network error reaching test push API' };
+  }
 }

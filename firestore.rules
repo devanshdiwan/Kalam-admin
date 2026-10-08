@@ -2,179 +2,168 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Default deny all
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
     // Helper functions
-    function isSignedIn() {
+    function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isCurrentUser(uid) {
-      return isSignedIn() && request.auth.uid == uid;
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
     }
 
     function isAdmin() {
-      return isSignedIn() && (
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
-        (request.auth.token.email != null && request.auth.token.email == "devanshdiwan97@gmail.com")
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        request.auth.token.role == 'SUPER_ADMIN' ||
+        request.auth.token.role == 'ADMIN' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.:]+$');
     }
 
     // Admins registry
     match /admins/{adminId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || (isAuthenticated() && request.auth.uid == adminId);
     }
 
-    // Users (Students / Accounts) - Allow read so student user app can login and verify profile
-    match /users/{uid} {
-      allow read: if true;
-      allow write: if isAdmin();
+    // Diagnostics test collection
+    match /_adminDiagnostics/{testId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Users (Students / Accounts)
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isOwner(userId);
+      allow delete: if isAdmin();
 
       // FCM device token registration
       match /devices/{deviceId} {
-        allow read: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
-        allow write: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
+        allow read, write: if isOwner(userId) || isAdmin();
       }
 
-      // Student notification inbox
+      // Student notification inboxes
       match /notifications/{notificationId} {
-        allow read: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
+        allow read: if isOwner(userId) || isAdmin();
         allow write: if isAdmin();
       }
     }
 
-    // User identifier mappings for uniqueness and lookup
+    // User identifier mappings for uniqueness check
     match /userIdentifiers/{identifierId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAdmin();
     }
 
-    // Join Requests
+    // Join Requests (Public can submit an inquiry, admins manage)
     match /joinRequests/{requestId} {
-      allow read: if isAdmin();
-      allow create: if true; // Public submission from student app or portal
-      allow update, delete: if isAdmin();
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
     }
 
     // Library Memberships
     match /libraryMemberships/{membershipId} {
-      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
-    // Library Seats
+    // Library Desks / Seats
     match /librarySeats/{seatId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isAdmin();
     }
 
-    // Library Books
+    // Library Books Catalog
     match /libraryBooks/{bookId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isAdmin();
     }
 
-    // Library Issues & Returns
+    // Library Book Issues & Returns
     match /libraryIssues/{issueId} {
-      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
-    // Library Attendance
+    // Library Attendance Records
     match /libraryAttendance/{attendanceId} {
-      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
     // Gate Passes
     match /gatePasses/{passId} {
-      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
-    // Fees & Billing
+    // Fees & Invoices
     match /fees/{feeId} {
-      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
-    // Notices
+    // Institutional Notices (Public can read notices, admins publish)
     match /notices/{noticeId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     // Push Notifications
     match /notifications/{notificationId} {
-      allow read, write: if true;
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
-    // Coaching collections
+    // Notification Send Audit Logs
+    match /notificationSendLogs/{logId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Coaching Classes & Batches
     match /coachingClasses/{classId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isAdmin();
     }
     match /coachingBatches/{batchId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isAdmin();
     }
     match /coachingSubjects/{subjectId} {
-      allow read: if isSignedIn();
+      allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
     match /coachingAttendance/{id} {
-      allow read: if isAdmin();
+      allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
     match /homework/{id} {
-      allow read: if isSignedIn();
+      allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
     match /assignments/{id} {
-      allow read: if isSignedIn();
+      allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
     match /studyMaterials/{id} {
-      allow read: if isSignedIn();
+      allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
     match /tests/{id} {
-      allow read: if isSignedIn();
+      allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
     match /results/{id} {
-      allow get: if isSignedIn() && (resource.data.studentId == request.auth.uid || isAdmin());
-      allow list: if isAdmin();
+      allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
 
-    // Admin Activity Logs
+    // Admin Activity Audit Logs
     match /adminActivityLogs/{logId} {
       allow read: if isAdmin();
-      allow create: if isAdmin();
-      allow update, delete: if false; // Immutable audit log
-    }
-
-    // User Devices for FCM
-    match /users/{uid}/devices/{deviceId} {
-      allow read, write: if true;
-    }
-
-    // User Notifications
-    match /users/{uid}/notifications/{notificationId} {
-      allow read, write: if true;
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
     }
   }
 }

@@ -55,6 +55,7 @@ import {
 } from './services/coachingService';
 import { subscribeToAdminUsers } from './services/adminUserService';
 import { getRecentActivityLogs } from './services/auditService';
+import { subscribeToQuotaStatus, retryCloudConnection } from './services/firebase';
 
 // Types
 import { 
@@ -128,6 +129,17 @@ export const AppContent: React.FC = () => {
   const [showNoticeModal, setShowNoticeModal] = useState<boolean>(false);
   const [showNotificationModal, setShowNotificationModal] = useState<boolean>(false);
 
+  // Cloud & Resilient Mode State
+  const [quotaExceeded, setQuotaExceeded] = useState<boolean>(false);
+  const [isRetryingCloud, setIsRetryingCloud] = useState<boolean>(false);
+  const [cloudStatusMsg, setCloudStatusMsg] = useState<string>('');
+
+  useEffect(() => {
+    return subscribeToQuotaStatus((exceeded) => {
+      setQuotaExceeded(exceeded);
+    });
+  }, []);
+
   // Setup Realtime Listeners when authenticated
   useEffect(() => {
     if (!currentUser) return;
@@ -136,7 +148,6 @@ export const AppContent: React.FC = () => {
 
     unsubs.push(subscribeToStudents((data) => {
       setStudents(data);
-      syncAllStudentsToServer(data);
     }));
     unsubs.push(subscribeToSeats(async (data) => {
       setSeats(data);
@@ -262,6 +273,41 @@ export const AppContent: React.FC = () => {
             if (currentTab !== 'students') setCurrentTab('students');
           }}
         />
+
+        {/* Resilient Mode Status Banner */}
+        {quotaExceeded && (
+          <div className="bg-gradient-to-r from-amber-950/70 via-slate-900 to-amber-950/70 border-b border-amber-500/30 px-4 py-2.5 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-3 shadow-inner">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-2.5 w-2.5 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+              </span>
+              <span className="font-semibold text-amber-300">Resilient Mode Active:</span>
+              <span className="text-slate-300">
+                Cloud sync paused (daily quota limit reached). All features (Students, Seats, Attendance, Fees, Notices) are working seamlessly using local & server storage.
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              {cloudStatusMsg && (
+                <span className="text-amber-300/80 italic text-[11px]">{cloudStatusMsg}</span>
+              )}
+              <button
+                onClick={async () => {
+                  setIsRetryingCloud(true);
+                  setCloudStatusMsg('Testing connection...');
+                  const res = await retryCloudConnection();
+                  setIsRetryingCloud(false);
+                  setCloudStatusMsg(res.message);
+                  setTimeout(() => setCloudStatusMsg(''), 4000);
+                }}
+                disabled={isRetryingCloud}
+                className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded text-[11px] font-medium transition cursor-pointer disabled:opacity-50"
+              >
+                {isRetryingCloud ? 'Testing...' : 'Check Cloud Connection'}
+              </button>
+            </div>
+          </div>
+        )}
 
         <main className="flex-1 p-4 md:p-6 lg:p-8 max-w-7xl w-full mx-auto">
           {currentTab === 'dashboard' && (
@@ -459,7 +505,10 @@ export const AppContent: React.FC = () => {
         initialData={prefilledJoinRequest}
         onSuccess={(student) => {
           refreshActivityLogs();
-          setSelectedStudentForDrawer(student);
+          if (student) {
+            setStudents(prev => [student, ...prev.filter(s => s.uid !== student.uid && s.userId !== student.userId)]);
+            setSelectedStudentForDrawer(student);
+          }
         }}
       />
 
@@ -548,13 +597,23 @@ export const AppContent: React.FC = () => {
       <NoticeModal
         isOpen={showNoticeModal}
         onClose={() => setShowNoticeModal(false)}
-        onSuccess={refreshActivityLogs}
+        onSuccess={(newNotice) => {
+          refreshActivityLogs();
+          if (newNotice) {
+            setNotices(prev => [newNotice, ...prev.filter(n => n.noticeId !== newNotice.noticeId)]);
+          }
+        }}
       />
 
       <NotificationComposerModal
         isOpen={showNotificationModal}
         onClose={() => setShowNotificationModal(false)}
-        onSuccess={refreshActivityLogs}
+        onSuccess={(newNotif) => {
+          refreshActivityLogs();
+          if (newNotif) {
+            setNotifications(prev => [newNotif, ...prev.filter(n => n.notificationId !== newNotif.notificationId)]);
+          }
+        }}
       />
 
     </div>

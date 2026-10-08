@@ -17,7 +17,7 @@ import {
   ResultRecord, 
   AdminActivityLog 
 } from '../types/models';
-import { db } from './firebase';
+import { db, isQuotaExceeded, handleQuotaExceeded } from './firebase';
 import { 
   collection, 
   doc, 
@@ -63,7 +63,7 @@ function generateInitialSeats(): LibrarySeat[] {
   return seats;
 }
 
-// Local Storage Helper
+// Local Storage Helper & Resilient Repository
 class ReactiveCollection<T extends { [key: string]: any }> {
   private key: string;
   private idKey: string;
@@ -71,6 +71,7 @@ class ReactiveCollection<T extends { [key: string]: any }> {
   private items: T[] = [];
   private listeners: Set<(items: T[]) => void> = new Set();
   private isListeningFirestore: boolean = false;
+  private firestoreUnsubscribe?: () => void;
 
   constructor(key: string, idKey: string, initialData?: T[], firestorePath?: string) {
     this.key = `kalam_${key}`;
@@ -110,28 +111,59 @@ class ReactiveCollection<T extends { [key: string]: any }> {
     });
   }
 
+  public replaceItems(newItems: T[]): void {
+    if (!Array.isArray(newItems)) return;
+    this.items = [...newItems];
+    this.save();
+  }
+
   private initFirestoreSync() {
-    if (!this.firestorePath || this.isListeningFirestore) return;
+    if (!this.firestorePath || this.isListeningFirestore || isQuotaExceeded()) return;
     this.isListeningFirestore = true;
 
     try {
       const colRef = collection(db, this.firestorePath);
-      onSnapshot(colRef, (snapshot) => {
+      this.firestoreUnsubscribe = onSnapshot(colRef, (snapshot) => {
         if (!snapshot.empty) {
-          const remoteList = snapshot.docs.map(d => d.data() as T);
-          // Merge remote items gracefully
+          const remoteList = snapshot.docs.map(d => {
+            const data = d.data() as any;
+            const itemId = data[this.idKey] || d.id;
+            return { ...data, [this.idKey]: itemId } as T;
+          }).filter(item => item && (item as any)[this.idKey]);
+
+          // Merge remote items gracefully without overwriting local items with empty keys
           const mergedMap = new Map<string, T>();
-          this.items.forEach(item => mergedMap.set(item[this.idKey], item));
-          remoteList.forEach(item => mergedMap.set(item[this.idKey], item));
+          this.items.forEach(item => {
+            if (item && item[this.idKey]) mergedMap.set(String(item[this.idKey]), item);
+          });
+          remoteList.forEach(item => {
+            if (item && (item as any)[this.idKey]) {
+              const k = String((item as any)[this.idKey]);
+              const existing = mergedMap.get(k);
+              mergedMap.set(k, existing ? { ...existing, ...item } : item);
+            }
+          });
           this.items = Array.from(mergedMap.values());
           this.save();
         }
-      }, (err) => {
-        // Silently handle invalid API key or connection error without throwing unhandled exceptions
-        // The local repository continues serving flawlessly
+      }, (error: any) => {
+        const isQuota = error?.code === 'resource-exhausted' ||
+          String(error?.message || '').toLowerCase().includes('quota') ||
+          String(error?.message || '').toLowerCase().includes('resource-exhausted');
+        
+        // Immediately detach listener to prevent exponential backoff spam
+        if (this.firestoreUnsubscribe) {
+          try { this.firestoreUnsubscribe(); } catch {}
+          this.firestoreUnsubscribe = undefined;
+        }
+        this.isListeningFirestore = false;
+
+        if (isQuota) {
+          handleQuotaExceeded(error?.message).catch(() => {});
+        }
       });
     } catch {
-      // Ignore background sync errors
+      this.isListeningFirestore = false;
     }
   }
 
@@ -163,11 +195,13 @@ class ReactiveCollection<T extends { [key: string]: any }> {
     }
     this.save();
 
-    // Sync to Firestore in background
-    if (this.firestorePath && id) {
-      try {
-        await setDoc(doc(db, this.firestorePath, String(id)), item as any, { merge: true }).catch(() => {});
-      } catch {}
+    // Sync to Firestore only if quota allows, without blocking UI
+    if (this.firestorePath && id && !isQuotaExceeded()) {
+      setDoc(doc(db, this.firestorePath, String(id)), item as any, { merge: true }).catch((err: any) => {
+        if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+          handleQuotaExceeded(err?.message).catch(() => {});
+        }
+      });
     }
 
     return item;
@@ -185,11 +219,13 @@ class ReactiveCollection<T extends { [key: string]: any }> {
     this.items[index] = updated;
     this.save();
 
-    // Sync to Firestore in background
-    if (this.firestorePath) {
-      try {
-        await updateDoc(doc(db, this.firestorePath, String(id)), partial as any).catch(() => {});
-      } catch {}
+    // Sync to Firestore only if quota allows, without blocking UI
+    if (this.firestorePath && id && !isQuotaExceeded()) {
+      updateDoc(doc(db, this.firestorePath, String(id)), partial as any).catch((err: any) => {
+        if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+          handleQuotaExceeded(err?.message).catch(() => {});
+        }
+      });
     }
 
     return updated;
@@ -199,11 +235,13 @@ class ReactiveCollection<T extends { [key: string]: any }> {
     this.items = this.items.filter(x => x[this.idKey] !== id);
     this.save();
 
-    // Sync to Firestore in background
-    if (this.firestorePath) {
-      try {
-        await deleteDoc(doc(db, this.firestorePath, String(id))).catch(() => {});
-      } catch {}
+    // Sync to Firestore only if quota allows, without blocking UI
+    if (this.firestorePath && id && !isQuotaExceeded()) {
+      deleteDoc(doc(db, this.firestorePath, String(id))).catch((err: any) => {
+        if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+          handleQuotaExceeded(err?.message).catch(() => {});
+        }
+      });
     }
   }
 }
@@ -226,3 +264,58 @@ export const repoHomework = new ReactiveCollection<HomeworkAssignment>('homework
 export const repoTests = new ReactiveCollection<TestRecord>('tests', 'testId', [], 'tests');
 export const repoResults = new ReactiveCollection<ResultRecord>('results', 'resultId', [], 'results');
 export const repoActivityLogs = new ReactiveCollection<AdminActivityLog>('activityLogs', 'logId', [], 'adminActivityLogs');
+
+// Server Database Hydration to ensure complete sync across sessions even when Cloud quota is reached
+export async function hydrateInitialDataFromServer(): Promise<void> {
+  try {
+    const res = await fetch('/api/admin/students');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.students) && data.students.length > 0) {
+        const current = repoStudents.getAll();
+        const map = new Map<string, UserProfile>();
+        current.forEach(s => {
+          const k = s.uid || s.userId;
+          if (k) map.set(k, s);
+        });
+        data.students.forEach((s: UserProfile) => {
+          const k = s.uid || s.userId;
+          if (k) {
+            const existing = map.get(k);
+            map.set(k, existing ? { ...existing, ...s } : s);
+          }
+        });
+        repoStudents.replaceItems(Array.from(map.values()));
+      }
+    }
+  } catch {}
+
+  try {
+    const res = await fetch('/api/admin/notices');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.notices && Array.isArray(data.notices) && data.notices.length > 0) {
+        const current = repoNotices.getAll();
+        const map = new Map<string, NoticeItem>();
+        current.forEach(n => {
+          if (n.noticeId) map.set(n.noticeId, n);
+        });
+        data.notices.forEach((n: NoticeItem) => {
+          if (n.noticeId) {
+            const existing = map.get(n.noticeId);
+            map.set(n.noticeId, existing ? { ...existing, ...n } : n);
+          }
+        });
+        repoNotices.replaceItems(Array.from(map.values()));
+      }
+    }
+  } catch {}
+}
+
+// Trigger initial hydration in background safely
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    hydrateInitialDataFromServer().catch(() => {});
+  }, 100);
+}
+

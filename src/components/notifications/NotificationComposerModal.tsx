@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { Bell, Send, AlertCircle, Smartphone } from 'lucide-react';
 import { Modal } from '../common/Modal';
-import { NoticeTarget } from '../../types/models';
+import { NoticeTarget, NotificationItem } from '../../types/models';
 import { sendPushNotification } from '../../services/notificationService';
 import { useAuth } from '../../context/AuthContext';
 
 interface NotificationComposerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (item?: NotificationItem) => void;
 }
 
 export const NotificationComposerModal: React.FC<NotificationComposerModalProps> = ({
@@ -37,7 +37,7 @@ export const NotificationComposerModal: React.FC<NotificationComposerModalProps>
     setError('');
 
     try {
-      await sendPushNotification({
+      const item = await sendPushNotification({
         title: title.trim(),
         message: message.trim(),
         targetType,
@@ -50,7 +50,7 @@ export const NotificationComposerModal: React.FC<NotificationComposerModalProps>
         role: role || 'ADMIN'
       });
 
-      onSuccess();
+      onSuccess(item);
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to dispatch notification.');

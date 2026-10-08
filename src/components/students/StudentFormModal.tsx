@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { LibrarySeat, UserProfile } from '../../types/models';
-import { generateNextUserId, isUserIdUnique, createStudentAccount } from '../../services/studentService';
+import { generateNextUserId, isUserIdUnique, createStudentAccount, uploadProfilePhoto } from '../../services/studentService';
 import { useAuth } from '../../context/AuthContext';
 
 interface StudentFormModalProps {
@@ -58,6 +58,8 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
   const [gender, setGender] = useState<'Male' | 'Female' | 'Other'>('Male');
   const [address, setAddress] = useState<string>('');
   const [profileImageUrl, setProfileImageUrl] = useState<string>('');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string>('');
 
   // Guardian
   const [fatherName, setFatherName] = useState<string>('');
@@ -150,11 +152,6 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
       setFormError('Full Name is required.');
       return;
     }
-    if (!email.trim() || !email.includes('@')) {
-      setActiveStep('personal');
-      setFormError('A valid Email address is required for authentication.');
-      return;
-    }
     if (!phone.trim()) {
       setActiveStep('personal');
       setFormError('Mobile phone number is required.');
@@ -174,12 +171,28 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
     setLoading(true);
 
     try {
+      let finalProfileUrl = profileImageUrl.trim();
+      if (photoFile) {
+        try {
+          finalProfileUrl = await uploadProfilePhoto(userId.trim().toUpperCase(), photoFile);
+        } catch (photoErr: any) {
+          setLoading(false);
+          setActiveStep('personal');
+          setFormError(photoErr.message || 'Profile image upload failed.');
+          return;
+        }
+      }
+
       const selectedSeat = availableSeats.find(s => s.seatId === assignedSeatId);
+      const cleanEmail = email.trim().toLowerCase().includes('@') 
+        ? email.trim().toLowerCase() 
+        : `${userId.trim().toLowerCase()}@kalamlibrary.internal`;
+
       const student = await createStudentAccount({
         userId: userId.trim().toUpperCase(),
         password,
         name: name.trim(),
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         phone: phone.trim(),
         dateOfBirth,
         gender,
@@ -197,7 +210,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
         membershipEndDate,
         assignedSeatId: assignedSeatId || '',
         assignedSeatNumber: selectedSeat ? selectedSeat.seatNumber : '',
-        profileImageUrl: profileImageUrl.trim()
+        profileImageUrl: finalProfileUrl
       }, {
         uid: adminProfile?.uid || 'admin_sys',
         name: adminProfile?.name || 'Administrator',
@@ -360,15 +373,14 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">
-                  Email Address <span className="text-amber-400">*</span>
+                  Email Address <span className="text-slate-400 font-normal">(Optional)</span>
                 </label>
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="student@example.com"
+                  placeholder="student@example.com (or auto-generated)"
                   className="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-lg text-slate-100 focus:border-amber-400 outline-none"
-                  required
                 />
               </div>
 
@@ -415,15 +427,45 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">
-                  Profile Photo URL
+                  Profile Photo (File Upload or URL)
                 </label>
-                <input
-                  type="url"
-                  value={profileImageUrl}
-                  onChange={(e) => setProfileImageUrl(e.target.value)}
-                  placeholder="https://... or upload in profile"
-                  className="w-full px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-lg text-slate-100 focus:border-amber-400 outline-none"
-                />
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-lg text-slate-300 text-xs font-semibold cursor-pointer shrink-0">
+                    <Camera size={14} className="text-amber-400" />
+                    <span>{photoFile ? 'Change Photo' : 'Upload File'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setPhotoFile(file);
+                          setPhotoPreview(URL.createObjectURL(file));
+                        }
+                      }}
+                    />
+                  </label>
+                  <input
+                    type="url"
+                    value={profileImageUrl}
+                    onChange={(e) => setProfileImageUrl(e.target.value)}
+                    placeholder="or paste image URL"
+                    className="flex-1 px-3 py-2 text-xs bg-slate-800 border border-slate-700 rounded-lg text-slate-100 focus:border-amber-400 outline-none"
+                  />
+                  {(photoPreview || profileImageUrl) && (
+                    <img 
+                      src={photoPreview || profileImageUrl} 
+                      alt="Preview" 
+                      className="w-8 h-8 rounded-full object-cover border border-amber-400/50 shrink-0"
+                    />
+                  )}
+                </div>
+                {photoFile && (
+                  <p className="text-[11px] text-amber-300 mt-1 font-mono truncate">
+                    Selected: {photoFile.name} ({(photoFile.size / 1024).toFixed(1)} KB)
+                  </p>
+                )}
               </div>
             </div>
 

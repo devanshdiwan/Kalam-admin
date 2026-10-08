@@ -10,9 +10,13 @@ import {
   Key, 
   Lock, 
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Activity,
+  AlertTriangle,
+  FileCheck2,
+  Trash2
 } from 'lucide-react';
-import { firebaseConfig, testConnection } from '../services/firebase';
+import { firebaseConfig, testConnection, runFirestoreDiagnostics, DiagnosticsReport } from '../services/firebase';
 import { initializeDefaultSeats } from '../services/seatService';
 import { useAuth } from '../context/AuthContext';
 import { Badge } from '../components/common/Badge';
@@ -32,8 +36,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [seedingSeats, setSeedingSeats] = useState<boolean>(false);
   const [seedMessage, setSeedMessage] = useState<string>('');
 
+  // Developer Diagnostic Suite State (Section 3 of Specification)
+  const [runningDiagnostics, setRunningDiagnostics] = useState<boolean>(false);
+  const [diagReport, setDiagReport] = useState<DiagnosticsReport | null>(null);
+  const [serverDiagReport, setServerDiagReport] = useState<any | null>(null);
+  const [diagError, setDiagError] = useState<string>('');
+
   // FCM Cloud Messaging Settings State
   const [fcmKey, setFcmKey] = useState<string>('');
+  const [serviceAccountInput, setServiceAccountInput] = useState<string>('');
+  const [hasServiceAccount, setHasServiceAccount] = useState<boolean>(false);
+  const [serviceAccountEmail, setServiceAccountEmail] = useState<string>('');
   const [savingFcm, setSavingFcm] = useState<boolean>(false);
   const [fcmMessage, setFcmMessage] = useState<string>('');
   const [testingFcm, setTestingFcm] = useState<boolean>(false);
@@ -44,6 +57,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       .then(r => r.json())
       .then(d => {
         if (d.fcmServerKey) setFcmKey(d.fcmServerKey);
+        if (d.hasServiceAccount) {
+          setHasServiceAccount(true);
+          setServiceAccountEmail(d.serviceAccountClientEmail || '');
+        }
       })
       .catch(() => {});
   }, []);
@@ -52,16 +69,25 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     setSavingFcm(true);
     setFcmMessage('');
     try {
+      const payload: any = { fcmServerKey: fcmKey.trim() };
+      if (serviceAccountInput.trim()) {
+        payload.serviceAccountJson = serviceAccountInput.trim();
+      }
       const res = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fcmServerKey: fcmKey.trim() })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (res.ok) {
-        setFcmMessage('FCM Server Key saved successfully. Push notifications will use this key for Google FCM API.');
+        setFcmMessage(data.message || 'FCM Gateway Settings saved successfully.');
+        if (data.hasServiceAccount) {
+          setHasServiceAccount(true);
+          setServiceAccountEmail(data.serviceAccountClientEmail || '');
+          setServiceAccountInput('');
+        }
       } else {
-        setFcmMessage(data.error || 'Failed to save FCM Server Key.');
+        setFcmMessage(data.error || 'Failed to save FCM settings.');
       }
     } catch (err: any) {
       setFcmMessage(err.message || 'Error saving FCM settings.');
@@ -108,6 +134,29 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       setConnSuccess(false);
     } finally {
       setTestingConn(false);
+    }
+  };
+
+  const handleRunDiagnostics = async () => {
+    setRunningDiagnostics(true);
+    setDiagError('');
+    setDiagReport(null);
+    setServerDiagReport(null);
+    try {
+      const [clientRes, srvRes] = await Promise.allSettled([
+        runFirestoreDiagnostics(),
+        fetch('/api/admin/diagnostics').then(r => r.json())
+      ]);
+      if (clientRes.status === 'fulfilled') {
+        setDiagReport(clientRes.value);
+      }
+      if (srvRes.status === 'fulfilled') {
+        setServerDiagReport(srvRes.value);
+      }
+    } catch (err: any) {
+      setDiagError(err.message || 'Diagnostic execution failed.');
+    } finally {
+      setRunningDiagnostics(false);
     }
   };
 
@@ -209,6 +258,112 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         </div>
       </div>
 
+      {/* Developer Diagnostics Suite (Section 3: Firestore CRUD Test) */}
+      <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-sky-500/10 text-sky-400 flex items-center justify-center font-bold">
+              <Activity size={20} />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-100 text-sm">Developer Diagnostics: Firestore CRUD Pipeline</h3>
+              <p className="text-xs text-slate-400">
+                End-to-end verification of Project ID, Auth, and atomic Write &rarr; Read &rarr; Update &rarr; Delete on <code className="text-amber-300">_adminDiagnostics</code>
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleRunDiagnostics}
+            disabled={runningDiagnostics}
+            className="px-4 py-2 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-2 transition-all cursor-pointer shadow-sm"
+          >
+            <RefreshCw size={14} className={runningDiagnostics ? 'animate-spin' : ''} />
+            <span>{runningDiagnostics ? 'Executing Test Suite...' : 'Run Developer Diagnostics'}</span>
+          </button>
+        </div>
+
+        {diagError && (
+          <div className="p-3 bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs rounded-lg flex items-center gap-2">
+            <AlertTriangle size={16} className="shrink-0" />
+            <span>{diagError}</span>
+          </div>
+        )}
+
+        {diagReport && (
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between p-3 bg-slate-850 rounded-lg border border-slate-750 text-xs">
+              <div className="flex items-center gap-2">
+                <span className={`w-2.5 h-2.5 rounded-full ${diagReport.overallSuccess ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                <span className="font-bold text-slate-200">
+                  Client Diagnostic Status: {diagReport.overallSuccess ? 'All Checks Passed (100%)' : 'Checks Encountered Diagnostics Note'}
+                </span>
+              </div>
+              <span className="font-mono text-[11px] text-slate-400">
+                Project: <strong className="text-amber-400">{diagReport.projectId}</strong>
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
+              {diagReport.steps.map((step, idx) => (
+                <div 
+                  key={idx} 
+                  className={`p-3 rounded-lg border ${
+                    step.success 
+                      ? 'bg-slate-850/80 border-slate-750 text-slate-200' 
+                      : 'bg-rose-950/20 border-rose-500/30 text-rose-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold flex items-center gap-1.5">
+                      {step.success ? (
+                        <CheckCircle2 size={14} className="text-emerald-400 shrink-0" />
+                      ) : (
+                        <AlertTriangle size={14} className="text-rose-400 shrink-0" />
+                      )}
+                      <span>{step.label}</span>
+                    </span>
+                    {step.durationMs > 0 && (
+                      <span className="text-[10px] font-mono text-slate-400">{step.durationMs}ms</span>
+                    )}
+                  </div>
+                  {step.details && (
+                    <p className="text-[11px] text-slate-400 mt-0.5">{step.details}</p>
+                  )}
+                  {step.error && (
+                    <p className="text-[11px] text-rose-300 font-mono mt-1 break-all">{step.error}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {serverDiagReport && (
+              <div className="p-3 bg-slate-850/60 rounded-lg border border-slate-750 text-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                    <FileCheck2 size={14} className="text-sky-400" />
+                    <span>Server-Side REST CRUD Pipeline</span>
+                  </span>
+                  <Badge variant={serverDiagReport.overallSuccess ? 'success' : 'warning'}>
+                    {serverDiagReport.overallSuccess ? 'REST Verified' : 'Check Log'}
+                  </Badge>
+                </div>
+                <div className="space-y-1.5 text-[11px]">
+                  {serverDiagReport.steps?.map((s: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between text-slate-400">
+                      <span>{s.label}</span>
+                      <span className={s.success ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+                        {s.success ? `${s.durationMs || 0}ms OK` : s.error || 'Failed'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Desk Seed Utility */}
       <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl space-y-4">
         <div className="flex items-center justify-between">
@@ -275,28 +430,62 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           </div>
         )}
 
-        <div className="space-y-3 pt-2 text-xs">
+        <div className="space-y-4 pt-2 text-xs">
+          {/* Status Indicator */}
+          <div className="p-3 bg-slate-800/60 rounded-xl border border-slate-750 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className={`w-2.5 h-2.5 rounded-full ${hasServiceAccount ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+              <span className="font-bold text-slate-200">FCM Gateway Status:</span>
+              <span className={hasServiceAccount ? 'text-emerald-400 font-semibold' : 'text-amber-300 font-semibold'}>
+                {hasServiceAccount ? 'FCM HTTP v1 Active (Service Account)' : 'Real-time Firestore Queue Mode Active'}
+              </span>
+            </div>
+            {serviceAccountEmail && (
+              <span className="text-[11px] text-slate-400 font-mono">
+                {serviceAccountEmail}
+              </span>
+            )}
+          </div>
+
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="font-bold text-slate-300">
-                FCM Server Key (Google Cloud Messaging)
+                Firebase Service Account JSON (Recommended for Google FCM v1)
               </label>
               <a
-                href="https://console.firebase.google.com/project/kalam-liberary/settings/cloudmessaging"
+                href="https://console.firebase.google.com/project/kalam-liberary/settings/serviceaccounts/adminsdk"
                 target="_blank"
                 rel="noreferrer"
                 className="text-[11px] text-amber-400 hover:underline flex items-center gap-1"
               >
-                <span>Find in Firebase Console</span>
+                <span>Generate Key in Firebase Console</span>
                 <ExternalLink size={11} />
               </a>
+            </div>
+            <textarea
+              rows={3}
+              value={serviceAccountInput}
+              onChange={(e) => setServiceAccountInput(e.target.value)}
+              placeholder='Paste service account JSON: {"type": "service_account", "project_id": "kalam-liberary", "private_key": "-----BEGIN PRIVATE KEY...}'
+              className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 font-mono text-[11px] outline-none focus:border-amber-400"
+            />
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Firebase Console &rarr; Project Settings &rarr; Service accounts &rarr; Generate new private key &rarr; Paste JSON contents here.
+            </p>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="font-bold text-slate-300">
+                FCM Server Key (Legacy Fallback)
+              </label>
             </div>
             <div className="flex items-center gap-2">
               <input
                 type="password"
                 value={fcmKey}
                 onChange={(e) => setFcmKey(e.target.value)}
-                placeholder="AAAA... or Service Account Key"
+                placeholder="AAAA... or Legacy FCM Server Key"
                 className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 font-mono text-xs outline-none focus:border-amber-400"
               />
               <button
@@ -305,11 +494,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 disabled={savingFcm}
                 className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold rounded-lg text-xs transition-colors cursor-pointer shrink-0"
               >
-                {savingFcm ? 'Saving...' : 'Save Key'}
+                {savingFcm ? 'Saving...' : 'Save Configuration'}
               </button>
             </div>
             <p className="text-[11px] text-slate-400 mt-1">
-              Dual-delivery pipeline: Even before configuring a legacy key, the admin panel automatically synchronizes notifications directly into Firestore <code className="text-amber-300">/notifications</code> and user inboxes <code className="text-amber-300">/users/{'{uid}'}/notifications</code> for immediate Android app consumption.
+              Dual-delivery pipeline: Every notification is automatically written into Firestore <code className="text-amber-300">/notifications</code> and user inboxes <code className="text-amber-300">/users/{'{uid}'}/notifications</code> for immediate live display.
             </p>
           </div>
         </div>

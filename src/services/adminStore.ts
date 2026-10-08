@@ -1,6 +1,6 @@
 import { AdminUser, AdminRole } from '../types/models';
 import { logAdminActivity } from './auditService';
-import { db } from './firebase';
+import { db, isQuotaExceeded, handleQuotaExceeded } from './firebase';
 import { doc, setDoc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 
 export interface StoredAdminAccount extends AdminUser {
@@ -11,7 +11,7 @@ const STORAGE_KEY = 'kalam_admin_accounts_registry';
 const SESSION_KEY = 'kalam_active_admin_session';
 
 export const DEFAULT_SUPER_ADMIN: StoredAdminAccount = {
-  uid: 'super_admin_root',
+  uid: 'QcobPhtQZyaeVIurJfeLzATyNQE2',
   name: 'SUPER ADMIN',
   email: 'superadmin@gmail.com',
   password: 'ADMIN123',
@@ -101,15 +101,21 @@ export function validateAdminLogin(emailInput: string, passwordInput: string): S
 
   // Sync to Firestore quietly in background if possible
   try {
-    setDoc(doc(db, 'admins', found.uid), {
-      uid: found.uid,
-      name: found.name,
-      email: found.email,
-      role: found.role,
-      status: found.status,
-      lastLogin: found.lastLogin,
-      createdAt: found.createdAt
-    }, { merge: true }).catch(() => {});
+    if (!isQuotaExceeded()) {
+      setDoc(doc(db, 'admins', found.uid), {
+        uid: found.uid,
+        name: found.name,
+        email: found.email,
+        role: found.role,
+        status: found.status,
+        lastLogin: found.lastLogin,
+        createdAt: found.createdAt
+      }, { merge: true }).catch((err: any) => {
+        if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+          handleQuotaExceeded(err?.message).catch(() => {});
+        }
+      });
+    }
   } catch {}
 
   return found;
@@ -142,14 +148,20 @@ export function createNewAdminAccount(
 
   // Sync to Firestore
   try {
-    setDoc(doc(db, 'admins', newAdmin.uid), {
-      uid: newAdmin.uid,
-      name: newAdmin.name,
-      email: newAdmin.email,
-      role: newAdmin.role,
-      status: newAdmin.status,
-      createdAt: newAdmin.createdAt
-    }).catch(() => {});
+    if (!isQuotaExceeded()) {
+      setDoc(doc(db, 'admins', newAdmin.uid), {
+        uid: newAdmin.uid,
+        name: newAdmin.name,
+        email: newAdmin.email,
+        role: newAdmin.role,
+        status: newAdmin.status,
+        createdAt: newAdmin.createdAt
+      }).catch((err: any) => {
+        if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+          handleQuotaExceeded(err?.message).catch(() => {});
+        }
+      });
+    }
   } catch {}
 
   logAdminActivity({
@@ -198,14 +210,20 @@ export function updateAdminAccountDetails(
 
   // Sync to Firestore
   try {
-    setDoc(doc(db, 'admins', adminUid), {
-      uid: updated.uid,
-      name: updated.name,
-      email: updated.email,
-      role: updated.role,
-      status: updated.status,
-      updatedAt: new Date().toISOString()
-    }, { merge: true }).catch(() => {});
+    if (!isQuotaExceeded()) {
+      setDoc(doc(db, 'admins', adminUid), {
+        uid: updated.uid,
+        name: updated.name,
+        email: updated.email,
+        role: updated.role,
+        status: updated.status,
+        updatedAt: new Date().toISOString()
+      }, { merge: true }).catch((err: any) => {
+        if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+          handleQuotaExceeded(err?.message).catch(() => {});
+        }
+      });
+    }
   } catch {}
 
   logAdminActivity({
@@ -237,7 +255,13 @@ export function deleteAdminAccount(
   saveAdminAccounts(filtered);
 
   try {
-    deleteDoc(doc(db, 'admins', adminUid)).catch(() => {});
+    if (!isQuotaExceeded()) {
+      deleteDoc(doc(db, 'admins', adminUid)).catch((err: any) => {
+        if (err?.code === 'resource-exhausted' || String(err?.message || '').toLowerCase().includes('quota')) {
+          handleQuotaExceeded(err?.message).catch(() => {});
+        }
+      });
+    }
   } catch {}
 
   logAdminActivity({
