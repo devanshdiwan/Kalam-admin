@@ -109,10 +109,10 @@ export const StudentDetailDrawer: React.FC<StudentDetailDrawerProps> = ({
           <div className="flex items-start gap-4">
             <div className="w-16 h-16 rounded-2xl bg-slate-800 border-2 border-amber-500/40 overflow-hidden flex items-center justify-center shrink-0 shadow-lg">
               {student.profileImageUrl ? (
-                <img src={student.profileImageUrl} alt={student.name} className="w-full h-full object-cover" />
+                <img src={student.profileImageUrl} alt={student.name || 'Student'} className="w-full h-full object-cover" />
               ) : (
                 <div className="text-xl font-bold text-amber-400">
-                  {student.name.charAt(0)}
+                  {(student.name || 'S').charAt(0).toUpperCase()}
                 </div>
               )}
             </div>
@@ -121,7 +121,7 @@ export const StudentDetailDrawer: React.FC<StudentDetailDrawerProps> = ({
               <div className="flex items-center justify-between gap-2 mb-1">
                 <div className="flex items-center gap-2">
                   <h3 className="text-lg font-bold text-slate-100 truncate">
-                    {student.name}
+                    {student.name || 'Student Details'}
                   </h3>
                   <Badge variant={student.active ? 'success' : 'danger'} size="sm">
                     {student.active ? 'ACTIVE' : 'DEACTIVATED'}

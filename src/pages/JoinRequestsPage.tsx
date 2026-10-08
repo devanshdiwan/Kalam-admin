@@ -48,12 +48,18 @@ export const JoinRequestsPage: React.FC<JoinRequestsPageProps> = ({
   const [inqMessage, setInqMessage] = useState<string>('');
   const [isSavingInquiry, setIsSavingInquiry] = useState<boolean>(false);
 
-  const filteredRequests = joinRequests.filter(req => {
-    const q = search.toLowerCase();
+  const filteredRequests = (joinRequests || []).filter(req => {
+    if (!req) return false;
+    const q = (search || '').toLowerCase().trim();
+    const fullName = (req.fullName || '').toLowerCase();
+    const phone = (req.phone || '');
+    const email = (req.email || '').toLowerCase();
+
     const matches = 
-      req.fullName.toLowerCase().includes(q) ||
-      req.phone.includes(q) ||
-      (req.email && req.email.toLowerCase().includes(q));
+      !q ||
+      fullName.includes(q) ||
+      phone.includes(q) ||
+      email.includes(q);
 
     if (!matches) return false;
     if (statusFilter !== 'ALL' && req.status !== statusFilter) return false;

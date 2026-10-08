@@ -344,7 +344,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex items-center justify-between gap-3 p-2 rounded-lg bg-slate-800/40 border border-slate-700/50">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center font-bold text-xs shrink-0">
-                {adminProfile?.name?.charAt(0) || 'A'}
+                {(adminProfile?.name || 'A').charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">
                 <div className="text-xs font-bold text-slate-200 truncate">

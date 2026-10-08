@@ -78,10 +78,13 @@ export const BulkAttendanceModal: React.FC<BulkAttendanceModalProps> = ({
     }
   };
 
-  const filteredStudents = activeStudents.filter(s => 
-    s.name.toLowerCase().includes(search.toLowerCase()) ||
-    s.userId.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredStudents = (activeStudents || []).filter(s => {
+    if (!s) return false;
+    const q = (search || '').toLowerCase().trim();
+    const name = (s.name || '').toLowerCase();
+    const userId = (s.userId || '').toLowerCase();
+    return !q || name.includes(q) || userId.includes(q);
+  });
 
   const presentCount = Object.values(attendanceMap).filter(v => v === 'PRESENT').length;
   const absentCount = Object.values(attendanceMap).filter(v => v === 'ABSENT').length;
@@ -196,10 +199,10 @@ export const BulkAttendanceModal: React.FC<BulkAttendanceModalProps> = ({
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
                       isPres ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
                     }`}>
-                      {student.name.charAt(0)}
+                      {(student.name || 'S').charAt(0).toUpperCase()}
                     </div>
                     <div>
-                      <div className="text-xs font-bold text-slate-100">{student.name}</div>
+                      <div className="text-xs font-bold text-slate-100">{student.name || 'Student'}</div>
                       <div className="text-[10px] text-slate-400 flex items-center gap-2">
                         <span className="font-mono text-amber-400">{student.userId}</span>
                         <span>•</span>

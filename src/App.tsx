@@ -149,12 +149,8 @@ export const AppContent: React.FC = () => {
     unsubs.push(subscribeToStudents((data) => {
       setStudents(data);
     }));
-    unsubs.push(subscribeToSeats(async (data) => {
+    unsubs.push(subscribeToSeats((data) => {
       setSeats(data);
-      // If seats collection is completely empty, initialize default 60 desks once
-      if (data.length === 0) {
-        await initializeDefaultSeats().catch(() => {});
-      }
     }));
     unsubs.push(subscribeToBooks(setBooks));
     unsubs.push(subscribeToIssues(setIssues));
@@ -178,7 +174,7 @@ export const AppContent: React.FC = () => {
     return () => {
       unsubs.forEach(unsub => unsub());
     };
-  }, [currentUser, attendanceDate]);
+  }, [currentUser?.uid, attendanceDate]);
 
   const refreshActivityLogs = async () => {
     const logs = await getRecentActivityLogs(30).catch(() => []);

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import { AdminUser, AdminRole } from '../types/models';
 import { 
   getActiveSession, 
@@ -31,9 +31,14 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [adminProfile, setAdminProfile] = useState<AdminUser | null>(null);
+  const [adminProfile, setAdminProfile] = useState<AdminUser | null>(() => {
+    return getActiveSession();
+  });
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(() => {
+    // If a valid session already exists in storage, do not block the UI on load
+    return !getActiveSession();
+  });
 
   const refreshProfile = () => {
     const session = getActiveSession();
@@ -49,21 +54,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const session = getActiveSession();
     if (session) {
       setAdminProfile(session);
+      setLoading(false);
     }
 
-    // Subscribe to Firebase Authentication state
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      setFirebaseUser(user);
-      if (user && session && session.uid !== user.uid) {
-        // Sync Firebase UID to current session if different
-        const updated = { ...session, uid: user.uid };
-        setActiveSession(updated);
-        setAdminProfile(updated);
-      }
+    // Safety timeout: Never keep the loading spinner up for more than 800ms
+    const safetyTimeout = setTimeout(() => {
       setLoading(false);
-    });
+    }, 800);
 
-    return () => unsubscribeAuth();
+    // Subscribe to Firebase Authentication state safely
+    let unsubscribeAuth = () => {};
+    try {
+      unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+        clearTimeout(safetyTimeout);
+        setFirebaseUser(user);
+        if (user && session && session.uid !== user.uid) {
+          // Sync Firebase UID to current session if different
+          const updated = { ...session, uid: user.uid };
+          setActiveSession(updated);
+          setAdminProfile(updated);
+        }
+        setLoading(false);
+      }, (err) => {
+        console.warn('[Firebase Auth state notice]:', err);
+        clearTimeout(safetyTimeout);
+        setLoading(false);
+      });
+    } catch (err) {
+      console.warn('[Firebase Auth listener notice]:', err);
+      clearTimeout(safetyTimeout);
+      setLoading(false);
+    }
+
+    return () => {
+      clearTimeout(safetyTimeout);
+      unsubscribeAuth();
+    };
   }, []);
 
   const loginWithEmail = async (email: string, pass: string) => {
@@ -115,11 +141,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return allowedRoles.includes(adminProfile.role);
   };
 
-  const currentUser = adminProfile ? {
-    uid: firebaseUser?.uid || adminProfile.uid,
-    email: adminProfile.email,
-    displayName: adminProfile.name
-  } : null;
+  const currentUser = useMemo(() => {
+    if (!adminProfile) return null;
+    return {
+      uid: firebaseUser?.uid || adminProfile.uid,
+      email: adminProfile.email,
+      displayName: adminProfile.name
+    };
+  }, [adminProfile, firebaseUser]);
 
   return (
     <AuthContext.Provider value={{

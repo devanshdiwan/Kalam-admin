@@ -50,14 +50,14 @@ interface DashboardPageProps {
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
-  students,
-  seats,
-  books,
-  issues,
-  joinRequests,
-  fees,
-  todayAttendance,
-  activityLogs,
+  students = [],
+  seats = [],
+  books = [],
+  issues = [],
+  joinRequests = [],
+  fees = [],
+  todayAttendance = [],
+  activityLogs = [],
   onNavigate,
   onOpenCreateStudent,
   onOpenScanGatePass,
@@ -67,24 +67,33 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   onOpenNoticeModal,
   onOpenNotificationModal
 }) => {
-  // Real statistical computations from Firebase data
-  const totalStudents = students.length;
-  const activeMembers = students.filter(s => s.active && s.membershipStatus === 'ACTIVE').length;
-  
-  const todayPresent = todayAttendance.filter(a => a.status === 'PRESENT').length;
+  const safeStudents = Array.isArray(students) ? students.filter(Boolean) : [];
+  const safeSeats = Array.isArray(seats) ? seats.filter(Boolean) : [];
+  const safeBooks = Array.isArray(books) ? books.filter(Boolean) : [];
+  const safeIssues = Array.isArray(issues) ? issues.filter(Boolean) : [];
+  const safeJoinRequests = Array.isArray(joinRequests) ? joinRequests.filter(Boolean) : [];
+  const safeFees = Array.isArray(fees) ? fees.filter(Boolean) : [];
+  const safeTodayAttendance = Array.isArray(todayAttendance) ? todayAttendance.filter(Boolean) : [];
+  const safeActivityLogs = Array.isArray(activityLogs) ? activityLogs.filter(Boolean) : [];
 
-  const totalSeats = seats.length;
-  const occupiedSeats = seats.filter(s => s.status === 'OCCUPIED').length;
-  const availableSeats = seats.filter(s => s.status === 'AVAILABLE').length;
+  // Real statistical computations from Firebase data
+  const totalStudents = safeStudents.length;
+  const activeMembers = safeStudents.filter(s => s && s.active && s.membershipStatus === 'ACTIVE').length;
+  
+  const todayPresent = safeTodayAttendance.filter(a => a && a.status === 'PRESENT').length;
+
+  const totalSeats = safeSeats.length;
+  const occupiedSeats = safeSeats.filter(s => s && s.status === 'OCCUPIED').length;
+  const availableSeats = safeSeats.filter(s => s && s.status === 'AVAILABLE').length;
 
   const todayIso = new Date().toISOString().split('T')[0];
-  const overdueBooks = issues.filter(i => i.status === 'ISSUED' && i.dueDate && i.dueDate < todayIso).length;
+  const overdueBooks = safeIssues.filter(i => i && i.status === 'ISSUED' && i.dueDate && i.dueDate < todayIso).length;
 
-  const pendingFeesTotal = fees
-    .filter(f => f.status === 'PENDING' || f.status === 'OVERDUE')
+  const pendingFeesTotal = safeFees
+    .filter(f => f && (f.status === 'PENDING' || f.status === 'OVERDUE'))
     .reduce((sum, f) => sum + (f.amount || 0), 0);
 
-  const newJoinRequests = joinRequests.filter(r => r.status === 'NEW').length;
+  const newJoinRequests = safeJoinRequests.filter(r => r && r.status === 'NEW').length;
 
   const kpis = [
     {
@@ -368,14 +377,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <div className="flex items-center justify-between p-3 bg-slate-800/40 rounded-lg">
                 <span className="text-slate-400">Ground Floor (Silent Hall)</span>
                 <span className="font-mono font-bold text-slate-100">
-                  {seats.filter(s => s.floor === 'Ground Floor' && s.status === 'OCCUPIED').length} / {seats.filter(s => s.floor === 'Ground Floor').length || 30}
+                  {safeSeats.filter(s => s && s.floor === 'Ground Floor' && s.status === 'OCCUPIED').length} / {safeSeats.filter(s => s && s.floor === 'Ground Floor').length || 30}
                 </span>
               </div>
 
               <div className="flex items-center justify-between p-3 bg-slate-800/40 rounded-lg">
                 <span className="text-slate-400">1st Floor (Cubicles & Cabin)</span>
                 <span className="font-mono font-bold text-slate-100">
-                  {seats.filter(s => s.floor === '1st Floor' && s.status === 'OCCUPIED').length} / {seats.filter(s => s.floor === '1st Floor').length || 30}
+                  {safeSeats.filter(s => s && s.floor === '1st Floor' && s.status === 'OCCUPIED').length} / {safeSeats.filter(s => s && s.floor === '1st Floor').length || 30}
                 </span>
               </div>
 

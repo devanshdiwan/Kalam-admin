@@ -95,10 +95,14 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({
     }
   };
 
-  const filtered = notifications.filter(n => 
-    n.title.toLowerCase().includes(search.toLowerCase()) ||
-    n.message.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = (notifications || []).filter(n => {
+    if (!n) return false;
+    const q = (search || '').toLowerCase().trim();
+    const title = (n.title || '').toLowerCase();
+    const message = (n.message || '').toLowerCase();
+
+    return !q || title.includes(q) || message.includes(q);
+  });
 
   return (
     <div className="space-y-6">
@@ -313,10 +317,10 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({
                     <div className="min-w-0">
                       <div className="font-bold text-[11px] truncate flex items-center gap-1.5">
                         <Smartphone size={12} className="text-amber-400 shrink-0" />
-                        <span>Device: {dev.deviceId.slice(0, 16)}...</span>
+                        <span>Device: {(dev.deviceId || '').slice(0, 16)}...</span>
                         {dev.userId && <span className="text-amber-300 font-mono text-[10px]">({dev.userId})</span>}
                       </div>
-                      <div className="text-[10px] text-slate-400 font-mono truncate">{dev.fcmToken.slice(0, 32)}...</div>
+                      <div className="text-[10px] text-slate-400 font-mono truncate">{(dev.fcmToken || '').slice(0, 32)}...</div>
                     </div>
                     <span className="text-[10px] font-bold text-amber-400 shrink-0">Select</span>
                   </button>

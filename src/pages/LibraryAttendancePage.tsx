@@ -30,11 +30,16 @@ export const LibraryAttendancePage: React.FC<LibraryAttendancePageProps> = ({
   const presentCount = attendanceRecords.filter(a => a.status === 'PRESENT').length;
   const absentCount = attendanceRecords.filter(a => a.status === 'ABSENT').length;
 
-  const filteredRecords = attendanceRecords.filter(r => {
-    const q = search.toLowerCase();
+  const filteredRecords = (attendanceRecords || []).filter(r => {
+    if (!r) return false;
+    const q = (search || '').toLowerCase().trim();
+    const studentName = (r.studentName || '').toLowerCase();
+    const studentId = (r.studentId || '').toLowerCase();
+
     const matches = 
-      r.studentName.toLowerCase().includes(q) ||
-      r.studentId.toLowerCase().includes(q);
+      !q ||
+      studentName.includes(q) ||
+      studentId.includes(q);
 
     if (!matches) return false;
     if (shiftFilter !== 'ALL' && r.shift !== shiftFilter) return false;

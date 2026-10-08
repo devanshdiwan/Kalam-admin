@@ -36,9 +36,12 @@ export const NoticesPage: React.FC<NoticesPageProps> = ({
     }
   };
 
-  const filteredNotices = notices.filter(n => {
-    const q = search.toLowerCase();
-    const matches = n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q);
+  const filteredNotices = (notices || []).filter(n => {
+    if (!n) return false;
+    const q = (search || '').toLowerCase().trim();
+    const title = (n.title || '').toLowerCase();
+    const body = (n.body || '').toLowerCase();
+    const matches = !q || title.includes(q) || body.includes(q);
     if (!matches) return false;
     if (categoryFilter !== 'ALL' && n.category !== categoryFilter) return false;
     return true;

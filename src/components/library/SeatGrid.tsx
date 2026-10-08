@@ -186,7 +186,7 @@ export const SeatGrid: React.FC<SeatGridProps> = ({
                     </div>
                   ) : (
                     <div className="text-[10px] font-medium capitalize">
-                      {seat.status.toLowerCase()}
+                      {(seat.status || 'AVAILABLE').toLowerCase()}
                     </div>
                   )}
                 </div>

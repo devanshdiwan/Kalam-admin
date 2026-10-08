@@ -85,15 +85,24 @@ class ReactiveCollection<T extends { [key: string]: any }> {
     try {
       const raw = localStorage.getItem(this.key);
       if (raw) {
-        this.items = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          this.items = parsed.filter(Boolean);
+        } else {
+          this.items = fallback ? [...fallback] : [];
+          this.save();
+        }
       } else if (fallback) {
-        this.items = fallback;
+        this.items = [...fallback];
         this.save();
       } else {
         this.items = [];
       }
     } catch {
-      this.items = fallback || [];
+      this.items = fallback ? [...fallback] : [];
+    }
+    if (!Array.isArray(this.items)) {
+      this.items = [];
     }
   }
 

@@ -162,11 +162,15 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
     }
   };
 
-  const filteredAdmins = adminList.filter(a => 
-    a.name.toLowerCase().includes(search.toLowerCase()) ||
-    a.email.toLowerCase().includes(search.toLowerCase()) ||
-    a.role.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredAdmins = (adminList || []).filter(a => {
+    if (!a) return false;
+    const q = (search || '').toLowerCase().trim();
+    const name = (a.name || '').toLowerCase();
+    const email = (a.email || '').toLowerCase();
+    const role = (a.role || '').toLowerCase();
+
+    return !q || name.includes(q) || email.includes(q) || role.includes(q);
+  });
 
   return (
     <div className="space-y-6">
@@ -261,13 +265,13 @@ export const AdminUsersPage: React.FC<AdminUsersPageProps> = ({
             <tbody className="divide-y divide-slate-800/80">
               {filteredAdmins.map(admin => {
                 const isCurrent = admin.uid === adminProfile?.uid;
-                const isRoot = admin.email.toLowerCase() === 'superadmin@gmail.com';
+                const isRoot = (admin.email || '').toLowerCase() === 'superadmin@gmail.com';
 
                 return (
                   <tr key={admin.uid} className="hover:bg-slate-800/40 transition-colors">
                     <td className="py-3.5 px-4 font-bold text-slate-100 flex items-center gap-2">
                       <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-amber-400">
-                        {admin.name.charAt(0)}
+                        {(admin.name || 'Admin').charAt(0)}
                       </div>
                       <div>
                         <span>{admin.name}</span>

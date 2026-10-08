@@ -81,12 +81,18 @@ export const GatePassesPage: React.FC<GatePassesPageProps> = ({
     }
   };
 
-  const filteredPasses = gatePasses.filter(gp => {
-    const q = search.toLowerCase();
+  const filteredPasses = (gatePasses || []).filter(gp => {
+    if (!gp) return false;
+    const q = (search || '').toLowerCase().trim();
+    const studentName = (gp.studentName || '').toLowerCase();
+    const studentId = (gp.studentId || '').toLowerCase();
+    const passId = (gp.passId || '').toLowerCase();
+
     const matches = 
-      gp.studentName.toLowerCase().includes(q) ||
-      gp.studentId.toLowerCase().includes(q) ||
-      gp.passId.toLowerCase().includes(q);
+      !q ||
+      studentName.includes(q) ||
+      studentId.includes(q) ||
+      passId.includes(q);
 
     if (!matches) return false;
     if (statusFilter !== 'ALL' && gp.status !== statusFilter) return false;

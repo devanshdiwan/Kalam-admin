@@ -44,12 +44,18 @@ export const LibraryIssuesPage: React.FC<LibraryIssuesPageProps> = ({
     }
   };
 
-  const filteredIssues = issues.filter(iss => {
-    const q = search.toLowerCase();
+  const filteredIssues = (issues || []).filter(iss => {
+    if (!iss) return false;
+    const q = (search || '').toLowerCase().trim();
+    const bookTitle = (iss.bookTitle || '').toLowerCase();
+    const studentName = (iss.studentName || '').toLowerCase();
+    const studentId = (iss.studentId || '').toLowerCase();
+
     const matches = 
-      iss.bookTitle.toLowerCase().includes(q) ||
-      iss.studentName.toLowerCase().includes(q) ||
-      iss.studentId.toLowerCase().includes(q);
+      !q ||
+      bookTitle.includes(q) ||
+      studentName.includes(q) ||
+      studentId.includes(q);
 
     if (!matches) return false;
 

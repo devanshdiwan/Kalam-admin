@@ -18,14 +18,20 @@ export const LibraryBooksPage: React.FC<LibraryBooksPageProps> = ({
   const [search, setSearch] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
 
-  const categories = Array.from(new Set(books.map(b => b.category))).filter(Boolean);
+  const categories = Array.from(new Set((books || []).map(b => b?.category))).filter(Boolean);
 
-  const filteredBooks = books.filter(b => {
-    const q = search.toLowerCase();
+  const filteredBooks = (books || []).filter(b => {
+    if (!b) return false;
+    const q = (search || '').toLowerCase().trim();
+    const title = (b.title || '').toLowerCase();
+    const author = (b.author || '').toLowerCase();
+    const isbn = (b.isbn || '').toLowerCase();
+
     const matches = 
-      b.title.toLowerCase().includes(q) ||
-      b.author.toLowerCase().includes(q) ||
-      (b.isbn && b.isbn.toLowerCase().includes(q));
+      !q ||
+      title.includes(q) ||
+      author.includes(q) ||
+      isbn.includes(q);
 
     if (!matches) return false;
     if (categoryFilter !== 'ALL' && b.category !== categoryFilter) return false;

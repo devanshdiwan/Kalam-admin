@@ -59,13 +59,20 @@ export const FeesBillingPage: React.FC<FeesBillingPageProps> = ({
     .filter(f => f.status === 'PAID' && f.paidDate && f.paidDate.startsWith(todayIso))
     .reduce((sum, f) => sum + (f.amount || 0), 0);
 
-  const filteredFees = fees.filter(f => {
-    const q = search.toLowerCase();
+  const filteredFees = (fees || []).filter(f => {
+    if (!f) return false;
+    const q = (search || '').toLowerCase().trim();
+    const studentName = (f.studentName || '').toLowerCase();
+    const studentId = (f.studentId || '').toLowerCase();
+    const receiptNumber = (f.receiptNumber || '').toLowerCase();
+    const title = (f.title || '').toLowerCase();
+
     const matches = 
-      f.studentName.toLowerCase().includes(q) ||
-      f.studentId.toLowerCase().includes(q) ||
-      (f.receiptNumber && f.receiptNumber.toLowerCase().includes(q)) ||
-      f.title.toLowerCase().includes(q);
+      !q ||
+      studentName.includes(q) ||
+      studentId.includes(q) ||
+      receiptNumber.includes(q) ||
+      title.includes(q);
 
     if (!matches) return false;
     if (statusFilter !== 'ALL' && f.status !== statusFilter) return false;

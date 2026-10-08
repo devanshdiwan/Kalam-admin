@@ -67,14 +67,15 @@ export function subscribeToAdminUsers(callback: (admins: AdminUser[]) => void, o
 
 export async function bootstrapInitialAdmin(user: { uid: string; email: string; displayName?: string | null }): Promise<AdminUser> {
   const localAccounts = getAdminAccounts();
-  const existingLocal = localAccounts.find(a => a.email.toLowerCase() === user.email.toLowerCase());
+  const userEmail = (user.email || '').toLowerCase();
+  const existingLocal = localAccounts.find(a => (a.email || '').toLowerCase() === userEmail);
   if (existingLocal) return existingLocal;
 
-  const isOwner = user.email.toLowerCase() === 'devanshdiwan97@gmail.com';
+  const isOwner = userEmail === 'devanshdiwan97@gmail.com';
   const newAdmin: StoredAdminAccount = {
     uid: user.uid,
-    name: user.displayName || user.email.split('@')[0] || 'Administrator',
-    email: user.email,
+    name: user.displayName || user.email?.split('@')[0] || 'Administrator',
+    email: user.email || `${user.uid}@kalamlibrary.internal`,
     role: (localAccounts.length === 0 || isOwner) ? 'SUPER_ADMIN' : 'STAFF',
     status: 'ACTIVE',
     createdAt: new Date().toISOString(),
@@ -106,7 +107,7 @@ export async function createAdminUser(
   const newAdmin: StoredAdminAccount = {
     uid: targetUid,
     name: data.name,
-    email: data.email.toLowerCase(),
+    email: (data.email || '').toLowerCase(),
     role: data.role,
     status: 'ACTIVE',
     createdAt: new Date().toISOString(),
@@ -115,7 +116,7 @@ export async function createAdminUser(
 
   // Always persist locally
   const accounts = getAdminAccounts();
-  if (accounts.some(a => a.email.toLowerCase() === newAdmin.email.toLowerCase())) {
+  if (accounts.some(a => (a.email || '').toLowerCase() === (newAdmin.email || '').toLowerCase())) {
     throw new Error(`An administrator with email "${data.email}" already exists.`);
   }
   accounts.push(newAdmin);

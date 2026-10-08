@@ -35,12 +35,13 @@ export function getAdminAccounts(): StoredAdminAccount[] {
       return [DEFAULT_SUPER_ADMIN];
     }
     // Ensure default super admin exists
-    const hasSuper = parsed.some(a => a.email.toLowerCase() === DEFAULT_SUPER_ADMIN.email.toLowerCase());
+    const validAccounts = parsed.filter(a => a && typeof a === 'object' && a.email);
+    const hasSuper = validAccounts.some(a => (a.email || '').toLowerCase() === DEFAULT_SUPER_ADMIN.email.toLowerCase());
     if (!hasSuper) {
-      parsed.unshift(DEFAULT_SUPER_ADMIN);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+      validAccounts.unshift(DEFAULT_SUPER_ADMIN);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(validAccounts));
     }
-    return parsed;
+    return validAccounts;
   } catch {
     return [DEFAULT_SUPER_ADMIN];
   }
@@ -58,7 +59,11 @@ export function getActiveSession(): StoredAdminAccount | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && parsed.email) {
+      return parsed;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -82,7 +87,7 @@ export function validateAdminLogin(emailInput: string, passwordInput: string): S
   const cleanPass = passwordInput.trim();
 
   const found = accounts.find(a => 
-    a.email.trim().toLowerCase() === cleanEmail && 
+    a && a.email && a.email.trim().toLowerCase() === cleanEmail && 
     (a.password || 'ADMIN123') === cleanPass
   );
 
@@ -126,9 +131,9 @@ export function createNewAdminAccount(
   actorAdmin: { uid: string; name: string; role: string }
 ): StoredAdminAccount {
   const accounts = getAdminAccounts();
-  const cleanEmail = data.email.trim().toLowerCase();
+  const cleanEmail = (data.email || '').trim().toLowerCase();
 
-  if (accounts.some(a => a.email.toLowerCase() === cleanEmail)) {
+  if (accounts.some(a => a && a.email && a.email.toLowerCase() === cleanEmail)) {
     throw new Error(`An administrator with email "${data.email}" already exists.`);
   }
 
@@ -247,7 +252,7 @@ export function deleteAdminAccount(
   const target = accounts.find(a => a.uid === adminUid);
   if (!target) return;
 
-  if (target.email.toLowerCase() === DEFAULT_SUPER_ADMIN.email.toLowerCase()) {
+  if ((target.email || '').toLowerCase() === DEFAULT_SUPER_ADMIN.email.toLowerCase()) {
     throw new Error('Primary root Super Admin account cannot be deleted.');
   }
 

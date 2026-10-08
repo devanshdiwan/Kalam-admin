@@ -3,14 +3,20 @@ import { logAdminActivity } from './auditService';
 import { repoNotifications } from './dataRepository';
 
 export function subscribeToNotifications(callback: (notifications: NotificationItem[]) => void, onError?: (err: any) => void) {
-  // Load and sync any notifications saved on server
+  // Load and sync any notifications saved on server in a single batch
   fetch('/api/admin/notifications')
     .then(r => r.json())
     .then(data => {
-      if (data.notifications && Array.isArray(data.notifications)) {
-        data.notifications.forEach((item: NotificationItem) => {
-          repoNotifications.set(item);
+      if (data.notifications && Array.isArray(data.notifications) && data.notifications.length > 0) {
+        const current = repoNotifications.getAll();
+        const map = new Map<string, NotificationItem>();
+        current.forEach(item => {
+          if (item?.notificationId) map.set(item.notificationId, item);
         });
+        data.notifications.forEach((item: NotificationItem) => {
+          if (item?.notificationId) map.set(item.notificationId, item);
+        });
+        repoNotifications.replaceItems(Array.from(map.values()));
       }
     })
     .catch(() => {});

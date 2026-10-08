@@ -54,14 +54,22 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({
   const pageSize = 12;
 
   const filteredStudents = useMemo(() => {
-    return students.filter(student => {
+    const list = Array.isArray(students) ? students.filter(Boolean) : [];
+    return list.filter(student => {
+      if (!student) return false;
       // Search match
-      const query = search.toLowerCase();
+      const query = (search || '').toLowerCase().trim();
+      const name = (student.name || '').toLowerCase();
+      const userId = (student.userId || '').toLowerCase();
+      const phone = (student.phone || '');
+      const email = (student.email || '').toLowerCase();
+
       const matchesSearch = 
-        student.name.toLowerCase().includes(query) ||
-        student.userId.toLowerCase().includes(query) ||
-        student.phone.includes(query) ||
-        student.email.toLowerCase().includes(query);
+        !query ||
+        name.includes(query) ||
+        userId.includes(query) ||
+        phone.includes(query) ||
+        email.includes(query);
 
       if (!matchesSearch) return false;
 
@@ -103,15 +111,15 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({
   const exportStudentsCsv = () => {
     const headers = ['User ID', 'Name', 'Phone', 'Email', 'Class', 'Membership', 'Seat', 'Status', 'Created Date'];
     const rows = filteredStudents.map(s => [
-      s.userId,
-      `"${s.name.replace(/"/g, '""')}"`,
-      s.phone,
-      s.email,
+      s.userId || '',
+      `"${(s.name || '').replace(/"/g, '""')}"`,
+      s.phone || '',
+      s.email || '',
       s.className || '',
       s.membershipType || '',
       s.assignedSeatNumber || 'Unassigned',
       s.active ? 'ACTIVE' : 'INACTIVE',
-      new Date(s.createdAt).toLocaleDateString()
+      s.createdAt ? new Date(s.createdAt).toLocaleDateString() : ''
     ]);
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
@@ -266,17 +274,17 @@ export const StudentsPage: React.FC<StudentsPageProps> = ({
                         <div className="flex items-center gap-3">
                           <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center font-bold text-amber-400 shrink-0">
                             {student.profileImageUrl ? (
-                              <img src={student.profileImageUrl} alt={student.name} className="w-full h-full object-cover" />
+                              <img src={student.profileImageUrl} alt={student.name || 'Student'} className="w-full h-full object-cover" />
                             ) : (
-                              student.name.charAt(0)
+                              (student.name || 'S').charAt(0).toUpperCase()
                             )}
                           </div>
                           <div>
                             <span className="font-bold text-slate-200 block group-hover:text-amber-300 transition-colors">
-                              {student.name}
+                              {student.name || 'Unnamed Student'}
                             </span>
                             <span className="text-[10px] text-slate-400 block truncate max-w-[140px]">
-                              {student.email}
+                              {student.email || '—'}
                             </span>
                           </div>
                         </div>

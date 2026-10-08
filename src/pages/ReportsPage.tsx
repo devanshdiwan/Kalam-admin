@@ -22,12 +22,12 @@ interface ReportsPageProps {
 }
 
 export const ReportsPage: React.FC<ReportsPageProps> = ({
-  students,
-  seats,
-  books,
-  issues,
-  fees,
-  attendance
+  students = [],
+  seats = [],
+  books = [],
+  issues = [],
+  fees = [],
+  attendance = []
 }) => {
   const [dateRangeStart, setDateRangeStart] = useState<string>(() => {
     const d = new Date();
